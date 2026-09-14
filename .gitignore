@@ -1,0 +1,26 @@
+# ---- Unreal build output -----------------------------------------------------
+Binaries/
+Intermediate/
+Saved/
+DerivedDataCache/
+Build/
+
+# ---- Editors and tooling -----------------------------------------------------
+.vs/
+.vscode/
+.idea/
+*.sln
+*.suo
+*.xcodeproj/
+*.xcworkspace/
+*.VC.db
+*.VC.opendb
+*.opensdf
+*.sdf
+compile_commands.json
+.clangd/
+
+# ---- Operating systems -------------------------------------------------------
+.DS_Store
+Thumbs.db
+desktop.ini

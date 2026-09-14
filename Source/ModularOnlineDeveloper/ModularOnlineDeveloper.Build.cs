@@ -1,0 +1,23 @@
+// Copyright PoFig Games Studio. All Rights Reserved.
+
+using UnrealBuildTool;
+
+public class ModularOnlineDeveloper : ModuleRules
+{
+	public ModularOnlineDeveloper(ReadOnlyTargetRules target) : base(target)
+	{
+		ModularOnlineDefaults.Apply(this);
+
+		PrivateDependencyModuleNames.AddRange(
+			[
+				"Core",
+				"CoreOnline",
+				"CoreUObject",
+				"Engine",
+				"GameplayTags",
+				"ModularOnline",
+				"OnlineServicesInterface",
+			]
+		);
+	}
+}

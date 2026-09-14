@@ -1,0 +1,35 @@
+{
+	"FileVersion": 3,
+	"Version": 1,
+	"VersionName": "0.1",
+	"FriendlyName": "Modular Online",
+	"Description": "Game facing layer over Online Services (OSSv2): identity, matches and the remaining online features, assembled from whatever the provider of the current platform actually implements.",
+	"Category": "Online Platform",
+	"CreatedBy": "PoFig Games Studio",
+	"CreatedByURL": "https://www.pofig.games",
+	"EnabledByDefault": false,
+	"CanContainContent": false,
+	"IsBetaVersion": true,
+	"Modules": [
+		{
+			"Name": "ModularOnline",
+			"Type": "Runtime",
+			"LoadingPhase": "Default"
+		},
+		{
+			"Name": "ModularOnlineDeveloper",
+			"Type": "DeveloperTool",
+			"LoadingPhase": "Default"
+		}
+	],
+	"Plugins": [
+		{
+			"Name": "OnlineServices",
+			"Enabled": true
+		},
+		{
+			"Name": "OnlineSubsystemUtils",
+			"Enabled": true
+		}
+	]
+}

@@ -1,0 +1,35 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 128 128">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#171C24"/>
+      <stop offset="1" stop-color="#0B0D11"/>
+    </linearGradient>
+  </defs>
+  <rect x="0" y="0" width="128" height="128" rx="28" ry="28" fill="url(#bg)"/>
+
+  <g stroke="#FFFFFF" stroke-width="3" stroke-linecap="round" opacity="0.85">
+    <line x1="64" y1="40" x2="64" y2="26"/>
+    <line x1="77" y1="47" x2="89" y2="40"/>
+    <line x1="77" y1="61" x2="89" y2="68"/>
+    <line x1="64" y1="68" x2="64" y2="82"/>
+    <line x1="51" y1="61" x2="39" y2="68"/>
+    <line x1="51" y1="47" x2="39" y2="40"/>
+  </g>
+
+  <circle cx="64" cy="54" r="14" fill="#FFFFFF"/>
+
+  <g fill="#FFFFFF">
+    <rect x="54" y="7" width="20" height="20" rx="6"/>
+    <rect x="89" y="28" width="20" height="20" rx="6"/>
+    <rect x="19" y="28" width="20" height="20" rx="6"/>
+    <rect x="54" y="82" width="20" height="20" rx="6"/>
+  </g>
+
+  <g fill="none" stroke="#FFFFFF" stroke-width="2.5" opacity="0.5" stroke-dasharray="5 4">
+    <rect x="89" y="61" width="20" height="20" rx="6"/>
+    <rect x="19" y="61" width="20" height="20" rx="6"/>
+  </g>
+
+  <text x="64" y="119" text-anchor="middle" font-family="Helvetica Neue, Helvetica, Arial, sans-serif"
+        font-size="13" font-weight="700" letter-spacing="2.4" fill="#E8EBF0">ONLINE</text>
+</svg>
