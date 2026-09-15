@@ -70,10 +70,26 @@ namespace PoFigGames::Online
 		/** Removes somebody from the match. Only the host may. */
 		virtual void KickMember(const FModularMatchContext& Context, const UE::Online::FAccountId& TargetAccount, FModularMatchOperationDelegate OnComplete) = 0;
 
-		/** Republishes what the match says about itself: its map, its mode, who may join. */
+		/** Republishes what the match says about itself: its map, its name, who may join. */
 		virtual void UpdateSettings(const FModularMatchContext& Context, const FModularMatchSettings& Settings, FModularMatchOperationDelegate OnComplete) = 0;
 
 		/** The match this local player is in, if any. */
 		virtual bool GetCurrentMatch(const FModularMatchContext& Context, FModularMatchHandle& OutMatch) const = 0;
+
+		/**
+		 * A string a stranger published, in a shape a widget may show.
+		 *
+		 * Match names, map names and every other attribute come off the wire as the host typed them. Control
+		 * characters and an unbounded length are the two that do damage on the way to a list.
+		 */
+		static MODULARONLINE_API FString DescribePublishedText(const FString& Published);
+
+		/**
+		 * Whether an attribute belongs to the provider rather than to the match.
+		 *
+		 * A provider publishes its own bookkeeping beside a match under a reserved prefix, and an update
+		 * that takes it off is either refused outright or blanks the fields a search filters on.
+		 */
+		static MODULARONLINE_API bool IsProviderAttribute(FName Attribute);
 	};
 }

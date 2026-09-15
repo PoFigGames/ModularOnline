@@ -42,7 +42,7 @@ FName UModularCrossPlaySettings::GetCategoryName() const
 	return PoFigGames::Online::Private::SettingsCategory;
 }
 
-FString UModularAccountSettings::GetAvatarAttribute(const FString& ProviderName) const
+FName UModularAccountSettings::GetAvatarAttribute(const FString& ProviderName) const
 {
 	if (const auto Configured = AvatarAttributeByProvider.Find(ProviderName))
 	{

@@ -192,7 +192,6 @@ protected:
 	/** Logins in flight. */
 	TArray<TSharedRef<FLoginRequest>> ActiveLogins { };
 
-	/** The last ticket issued to each local player, by player index. */
 	/** What the game said is true of this platform. */
 	FGameplayTagContainer TraitTags { };
 
@@ -284,6 +283,9 @@ protected:
 
 	/** Reads account, nickname and avatar of a player from a role and caches them. */
 	MODULARONLINE_API void RefreshRoleData(UModularUserInfo* User, EModularOnlineRole Role);
+
+	/** The answer when the provider has no privileges component: a refusal on a platform that gates, a grant elsewhere. */
+	MODULARONLINE_API EModularOnlinePrivilegeResult AnswerUnaskedPrivilege(EModularOnlinePrivilege Privilege) const;
 
 	/** Writes a privilege answer into the player and tells anyone watching when it changed. */
 	MODULARONLINE_API void UpdatePrivilege(UModularUserInfo* User, EModularOnlinePrivilege Privilege, EModularOnlinePrivilegeResult Result, EModularOnlineRole Role);

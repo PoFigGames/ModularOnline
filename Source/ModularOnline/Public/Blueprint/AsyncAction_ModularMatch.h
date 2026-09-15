@@ -84,11 +84,11 @@ public:
 
 	/** Matches were found; the list may still be empty when nobody is hosting. */
 	UPROPERTY(BlueprintAssignable)
-	FModularMatchSearchCompleted OnSuccess;
+	FModularMatchSearchCompleted OnSuccess { };
 
 	/** The search itself failed, or this platform cannot search at all. */
 	UPROPERTY(BlueprintAssignable)
-	FModularMatchSearchCompleted OnFailure;
+	FModularMatchSearchCompleted OnFailure { };
 
 #pragma region UBlueprintAsyncActionBase
 

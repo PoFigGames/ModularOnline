@@ -34,6 +34,7 @@ void UModularOnlineSubsystem::Deinitialize()
 	Contexts.Reset();
 	BoundInstanceName = FName { };
 	bContextsBuilt = false;
+	bServiceProviderRefused = false;
 
 	Super::Deinitialize();
 }
@@ -65,6 +66,11 @@ EModularOnlineRole UModularOnlineSubsystem::ResolveRole(const EModularOnlineRole
 		return Role;
 	}
 
+	if (Role == EModularOnlineRole::Service && bServiceProviderRefused)
+	{
+		return Role;
+	}
+
 	return Contexts.Contains(EModularOnlineRole::Default) ? EModularOnlineRole::Default : Role;
 }
 
@@ -78,8 +84,9 @@ const FModularOnlineContext* UModularOnlineSubsystem::GetContext(const EModularO
 	}
 
 	// A role without a provider of its own is served by the default one, which is the shape of every
-	// project that ships on a single backend.
-	if (Role != EModularOnlineRole::Default)
+	// project that ships on a single backend. A service provider that was asked for and did not answer is
+	// not that shape: the configuration was not honoured, so the role stays empty and its callers refuse.
+	if (Role != EModularOnlineRole::Default && !(Role == EModularOnlineRole::Service && bServiceProviderRefused))
 	{
 		if (const auto Fallback = Contexts.Find(EModularOnlineRole::Default))
 		{
@@ -133,6 +140,10 @@ bool UModularOnlineSubsystem::HasAnyProvider() const
 
 void UModularOnlineSubsystem::RefreshCapabilities()
 {
+	// The console command is what a developer reaches for when the answer looks wrong, so it asks the
+	// engine again rather than re-reading what the last probe concluded.
+	bContextsBuilt = false;
+
 	EnsureContexts();
 
 	for (const auto& Pair : Contexts)
@@ -151,6 +162,7 @@ FString UModularOnlineSubsystem::DescribeCapabilities() const
 	EnsureContexts();
 
 	// Outside the editor the engine names no instance, and an empty one reads like something went missing.
+	// GetServicesInstanceName answered that way on 5.8.3 when it was checked on 2026-09-15.
 	const auto InstanceLabel = BoundInstanceName.IsNone()
 		? FString { TEXT("the default instance") }
 		: FString::Printf(TEXT("instance '%s'"), *BoundInstanceName.ToString());
@@ -191,17 +203,17 @@ void UModularOnlineSubsystem::EnsureContexts() const
 	const auto GameInstance = GetGameInstance();
 	const auto World = GameInstance ? GameInstance->GetWorld() : nullptr;
 
-	// Asked on every getter and from every event handler, and answering it walks the engine's world
-	// contexts. The same world cannot have a different instance name, so the question is only put when
-	// the world is not the one already answered for.
-	if (bContextsBuilt && World == BoundWorld)
+	// Asked on every getter, and answering walks the engine's world contexts, so it is only put again for
+	// a new world. An empty answer is never kept: the registry creates an instance on demand, so a probe
+	// that ran before the provider registered itself must be repeated.
+	if (bContextsBuilt && World == BoundWorld && !Contexts.IsEmpty())
 	{
 		return;
 	}
 
 	BoundWorld = World;
 
-	if (const auto InstanceName = UE::Online::GetServicesInstanceName(World); !bContextsBuilt || InstanceName != BoundInstanceName)
+	if (const auto InstanceName = UE::Online::GetServicesInstanceName(World); !bContextsBuilt || Contexts.IsEmpty() || InstanceName != BoundInstanceName)
 	{
 		BoundInstanceName = InstanceName;
 		bContextsBuilt = true;
@@ -213,6 +225,7 @@ void UModularOnlineSubsystem::EnsureContexts() const
 void UModularOnlineSubsystem::CreateContexts() const
 {
 	Contexts.Reset();
+	bServiceProviderRefused = false;
 
 	const auto GameInstance = GetGameInstance();
 	const auto World = GameInstance ? GameInstance->GetWorld() : nullptr;
@@ -242,12 +255,20 @@ void UModularOnlineSubsystem::CreateContexts() const
 		}
 		else
 		{
-			// Asked for and not there. Falling back to the default provider quietly would leave a project
-			// that configured two providers running on one and never being told which one it is on.
+			// Asked for and not there. Serving it from the default provider would leave a project that
+			// configured two providers running on one and never being told which one it is on.
+			bServiceProviderRefused = true;
+
 			UE_LOG(LogModularOnline, Error,
-				TEXT("Service role is configured as '%s', which did not answer. Everything addressed to it answers the default provider instead; check that the provider's plugin is enabled."),
+				TEXT("Service role is configured as '%s', which did not answer. Everything addressed to it is refused; check that the provider's plugin is enabled."),
 				LexToString(ConfiguredService));
 		}
+	}
+	else if (const auto Settings = GetDefault<UModularOnlineSettings>(); Settings && !Settings->ServiceProvider.IsEmpty())
+	{
+		// A name that resolves to no provider is a mistake in the configuration, not a decision to have no
+		// service role; GetConfiguredServiceProvider has already said so in the log.
+		bServiceProviderRefused = true;
 	}
 
 	if (const auto Settings = GetDefault<UModularOnlineSettings>(); Settings && Settings->bLogCapabilitiesOnStartup)

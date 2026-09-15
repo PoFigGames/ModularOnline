@@ -65,7 +65,8 @@ FModularOnlineResult FModularOnlineResult::NotSupported(const FGameplayTag Featu
 	FModularOnlineResult Result { };
 	Result.bWasSuccessful = false;
 	Result.Category = EModularOnlineErrorCategory::NotSupported;
-	Result.ErrorId = UE::Online::Errors::NotImplemented().GetErrorId();
+	const auto NotImplemented = UE::Online::Errors::NotImplemented();
+	Result.ErrorId = NotImplemented.GetErrorId();
 	Result.ErrorText = FText::Format(LOCTEXT("FeatureNotSupported", "{0} is not available on this platform."), FText::FromName(Feature.GetTagName()));
 	Result.MissingFeature = Feature;
 

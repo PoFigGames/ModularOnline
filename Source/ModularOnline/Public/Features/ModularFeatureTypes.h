@@ -272,6 +272,10 @@ struct FModularAchievement
 	UPROPERTY(BlueprintReadOnly, Category = "ModularOnline")
 	bool bIsUnlocked { false };
 
+	/** How far along they are, from 0 to 1. A progress bar reads this; 1 is what unlocked means. */
+	UPROPERTY(BlueprintReadOnly, Category = "ModularOnline")
+	float Progress { 0.0f };
+
 	/** When they got it, meaningful only once they have. */
 	UPROPERTY(BlueprintReadOnly, Category = "ModularOnline")
 	FDateTime UnlockTime { };

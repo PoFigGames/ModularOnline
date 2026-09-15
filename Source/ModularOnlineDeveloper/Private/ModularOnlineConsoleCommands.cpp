@@ -82,6 +82,12 @@ namespace PoFigGames::Online::Private
 				{
 					Role = EModularOnlineRole::Service;
 				}
+				else if (!Args[1].Equals(TEXT("Default"), ESearchCase::IgnoreCase))
+				{
+					UE_LOG(LogModularOnline, Warning, TEXT("'%s' is not a role; ask about Default, Platform or Service."), *Args[1]);
+
+					return;
+				}
 			}
 
 			UE_LOG(LogModularOnline, Display, TEXT("%s on %s: %s"),

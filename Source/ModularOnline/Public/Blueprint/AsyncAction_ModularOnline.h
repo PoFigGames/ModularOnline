@@ -66,15 +66,15 @@ class UAsyncAction_ModularOnlineResultBase : public UAsyncAction_ModularOnlineBa
 public:
 	/** The operation did what was asked. */
 	UPROPERTY(BlueprintAssignable)
-	FModularOnlineActionCompleted OnSuccess;
+	FModularOnlineActionCompleted OnSuccess { };
 
 	/** The operation failed; Result says why, and ErrorText can be shown to the player. */
 	UPROPERTY(BlueprintAssignable)
-	FModularOnlineActionCompleted OnFailure;
+	FModularOnlineActionCompleted OnFailure { };
 
 	/** The provider of this platform implements no such component. Retrying will not change that. */
 	UPROPERTY(BlueprintAssignable)
-	FModularOnlineActionCompleted OnNotSupported;
+	FModularOnlineActionCompleted OnNotSupported { };
 
 protected:
 	/** Broadcasts on the pin the result calls for and retires the node. Safe to call more than once. */

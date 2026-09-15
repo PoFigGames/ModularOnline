@@ -10,6 +10,13 @@
 
 #include UE_INLINE_GENERATED_CPP_BY_NAME(ModularLeaderboardsSubsystem)
 
+void UModularLeaderboardsSubsystem::AnnounceEntries(const TArray<FModularLeaderboardEntry>& Entries, const FModularOnlineResult& Result, const FModularLeaderboardDelegate& OnComplete)
+{
+	OnComplete.ExecuteIfBound(Entries, Result);
+	OnLeaderboardQueried.Broadcast(Entries, Result);
+	K2_OnLeaderboardQueried.Broadcast(Entries, Result);
+}
+
 namespace PoFigGames::Online::Private
 {
 	/** The lines of a table as a screen reads them. */
@@ -38,18 +45,18 @@ FGameplayTag UModularLeaderboardsSubsystem::GetFeatureTag() const
 }
 
 bool UModularLeaderboardsSubsystem::CanRead(const TSharedPtr<UE::Online::ILeaderboards>& Leaderboards, const UE::Online::FAccountId& Account,
-	const FModularLeaderboardDelegate& OnComplete) const
+	const FModularLeaderboardDelegate& OnComplete)
 {
 	if (!Leaderboards.IsValid())
 	{
-		OnComplete.ExecuteIfBound(TArray<FModularLeaderboardEntry> { }, MissingFeature());
+		AnnounceEntries(TArray<FModularLeaderboardEntry> { }, MissingFeature(), OnComplete);
 
 		return false;
 	}
 
 	if (!Account.IsValid())
 	{
-		OnComplete.ExecuteIfBound(TArray<FModularLeaderboardEntry> { }, NotSignedIn());
+		AnnounceEntries(TArray<FModularLeaderboardEntry> { }, NotSignedIn(), OnComplete);
 
 		return false;
 	}
@@ -74,16 +81,16 @@ bool UModularLeaderboardsSubsystem::ReadAroundPlayer(const int32 LocalPlayerInde
 	Params.Limit = static_cast<uint32>(FMath::Max(1, Limit));
 	Params.BoardName = BoardName;
 
-	Leaderboards->ReadEntriesAroundUser(MoveTemp(Params)).OnComplete(this, [OnComplete](const UE::Online::TOnlineResult<UE::Online::FReadEntriesAroundUser>& Result)
+	Leaderboards->ReadEntriesAroundUser(MoveTemp(Params)).OnComplete(this, [this, OnComplete](const UE::Online::TOnlineResult<UE::Online::FReadEntriesAroundUser>& Result)
 	{
 		if (Result.IsError())
 		{
-			OnComplete.ExecuteIfBound(TArray<FModularLeaderboardEntry> { }, FModularOnlineResult::FromOnlineError(Result.GetErrorValue()));
+			AnnounceEntries(TArray<FModularLeaderboardEntry> { }, FModularOnlineResult::FromOnlineError(Result.GetErrorValue()), OnComplete);
 
 			return;
 		}
 
-		OnComplete.ExecuteIfBound(PoFigGames::Online::Private::DescribeEntries(Result.GetOkValue().Entries), FModularOnlineResult::Success());
+		AnnounceEntries(PoFigGames::Online::Private::DescribeEntries(Result.GetOkValue().Entries), FModularOnlineResult::Success(), OnComplete);
 	});
 
 	return true;
@@ -105,16 +112,16 @@ bool UModularLeaderboardsSubsystem::ReadAroundRank(const int32 LocalPlayerIndex,
 	Params.Limit = static_cast<uint32>(FMath::Max(1, Limit));
 	Params.BoardName = BoardName;
 
-	Leaderboards->ReadEntriesAroundRank(MoveTemp(Params)).OnComplete(this, [OnComplete](const UE::Online::TOnlineResult<UE::Online::FReadEntriesAroundRank>& Result)
+	Leaderboards->ReadEntriesAroundRank(MoveTemp(Params)).OnComplete(this, [this, OnComplete](const UE::Online::TOnlineResult<UE::Online::FReadEntriesAroundRank>& Result)
 	{
 		if (Result.IsError())
 		{
-			OnComplete.ExecuteIfBound(TArray<FModularLeaderboardEntry> { }, FModularOnlineResult::FromOnlineError(Result.GetErrorValue()));
+			AnnounceEntries(TArray<FModularLeaderboardEntry> { }, FModularOnlineResult::FromOnlineError(Result.GetErrorValue()), OnComplete);
 
 			return;
 		}
 
-		OnComplete.ExecuteIfBound(PoFigGames::Online::Private::DescribeEntries(Result.GetOkValue().Entries), FModularOnlineResult::Success());
+		AnnounceEntries(PoFigGames::Online::Private::DescribeEntries(Result.GetOkValue().Entries), FModularOnlineResult::Success(), OnComplete);
 	});
 
 	return true;
@@ -146,21 +153,21 @@ bool UModularLeaderboardsSubsystem::ReadForPlayers(const int32 LocalPlayerIndex,
 	if (Params.AccountIds.IsEmpty())
 	{
 		// Nobody this provider knows was asked about; an empty table is the honest answer.
-		OnComplete.ExecuteIfBound(TArray<FModularLeaderboardEntry> { }, FModularOnlineResult::Success());
+		AnnounceEntries(TArray<FModularLeaderboardEntry> { }, FModularOnlineResult::Success(), OnComplete);
 
 		return true;
 	}
 
-	Leaderboards->ReadEntriesForUsers(MoveTemp(Params)).OnComplete(this, [OnComplete](const UE::Online::TOnlineResult<UE::Online::FReadEntriesForUsers>& Result)
+	Leaderboards->ReadEntriesForUsers(MoveTemp(Params)).OnComplete(this, [this, OnComplete](const UE::Online::TOnlineResult<UE::Online::FReadEntriesForUsers>& Result)
 	{
 		if (Result.IsError())
 		{
-			OnComplete.ExecuteIfBound(TArray<FModularLeaderboardEntry> { }, FModularOnlineResult::FromOnlineError(Result.GetErrorValue()));
+			AnnounceEntries(TArray<FModularLeaderboardEntry> { }, FModularOnlineResult::FromOnlineError(Result.GetErrorValue()), OnComplete);
 
 			return;
 		}
 
-		OnComplete.ExecuteIfBound(PoFigGames::Online::Private::DescribeEntries(Result.GetOkValue().Entries), FModularOnlineResult::Success());
+		AnnounceEntries(PoFigGames::Online::Private::DescribeEntries(Result.GetOkValue().Entries), FModularOnlineResult::Success(), OnComplete);
 	});
 
 	return true;

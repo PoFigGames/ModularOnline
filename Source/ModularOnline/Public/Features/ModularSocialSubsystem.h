@@ -17,6 +17,10 @@ namespace UE::Online
 /** How a request about the friends list ends. */
 DECLARE_DELEGATE_TwoParams(FModularFriendsDelegate, const TArray<FModularFriend>& /*Friends*/, const FModularOnlineResult& /*Result*/);
 
+/** The answer to a query this subsystem was asked for; what it fetched is in the cache. */
+DECLARE_MULTICAST_DELEGATE_TwoParams(FModularFriendsQueriedEvent, const TArray<FModularFriend>& /*Friends*/, const FModularOnlineResult& /*Result*/);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FModularFriendsQueriedDynamic, const TArray<FModularFriend>&, Friends, const FModularOnlineResult&, Result);
+
 /** What one account is to the local player changed. */
 DECLARE_MULTICAST_DELEGATE_TwoParams(FModularRelationshipEvent, const FModularAccountHandle& /*AccountId*/, EModularRelationship /*Relationship*/);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FModularRelationshipDynamic, const FModularAccountHandle&, AccountId, EModularRelationship, Relationship);
@@ -36,7 +40,10 @@ public:
 	/** Fired when somebody becomes a friend, stops being one, or is blocked. */
 	FModularRelationshipEvent OnRelationshipChanged { };
 
-#pragma region UModularFeatureSubsystem
+/** Fired when a query finishes, with what it fetched and how it ended. */
+	FModularFriendsQueriedEvent OnFriendsQueried { };
+
+	#pragma region UModularFeatureSubsystem
 
 	MODULARONLINE_API virtual void Deinitialize() override;
 	MODULARONLINE_API virtual FGameplayTag GetFeatureTag() const override;
@@ -56,6 +63,12 @@ public:
 	MODULARONLINE_API virtual bool RespondToFriendInvite(int32 LocalPlayerIndex, const FModularAccountHandle& TargetAccountId, bool bAccept);
 
 protected:
+	/** The same event, for Blueprint. */
+	UPROPERTY(BlueprintAssignable, Category = "ModularOnline|Social", meta = (DisplayName = "On Friends Queried"))
+	FModularFriendsQueriedDynamic K2_OnFriendsQueried { };
+
+	/** Answers a query on the caller's delegate and on both events. */
+	MODULARONLINE_API void AnnounceFriends(const TArray<FModularFriend>& Friends, const FModularOnlineResult& Result, const FModularFriendsDelegate& OnComplete);
 	/** The same event, for Blueprint. */
 	UPROPERTY(BlueprintAssignable, Category = "ModularOnline|Social", meta = (DisplayName = "On Relationship Changed"))
 	FModularRelationshipDynamic K2_OnRelationshipChanged { };

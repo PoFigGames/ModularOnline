@@ -9,6 +9,13 @@
 
 #include UE_INLINE_GENERATED_CPP_BY_NAME(ModularStatsSubsystem)
 
+void UModularStatsSubsystem::AnnounceStats(const FModularStatMap& Stats, const FModularOnlineResult& Result, const FModularStatsDelegate& OnComplete)
+{
+	OnComplete.ExecuteIfBound(Stats, Result);
+	OnStatsQueried.Broadcast(Stats, Result);
+	K2_OnStatsQueried.Broadcast(Result);
+}
+
 namespace PoFigGames::Online::Private
 {
 	/** A value of this plugin as the services carry it. */
@@ -127,7 +134,7 @@ bool UModularStatsSubsystem::UpdateStats(const int32 LocalPlayerIndex, const TMa
 
 	// The answer is nobody's to wait for, but a refusal that nothing reports is a write that
 	// silently did not happen.
-	StatsInterface->UpdateStats(MoveTemp(Params)).OnComplete(this, [](const UE::Online::TOnlineResult<UE::Online::FUpdateStats>& Result)
+	StatsInterface->UpdateStats(MoveTemp(Params)).OnComplete(this, [this](const UE::Online::TOnlineResult<UE::Online::FUpdateStats>& Result)
 	{
 		UE_CLOG(Result.IsError(), LogModularOnline, Warning, TEXT("The services refused to write a stat: %s"), *Result.GetErrorValue().GetLogString());
 	});
@@ -143,14 +150,14 @@ bool UModularStatsSubsystem::QueryStats(const int32 LocalPlayerIndex, const FMod
 
 	if (!StatsInterface.IsValid())
 	{
-		OnComplete.ExecuteIfBound(TMap<FString, FModularStatValue> { }, MissingFeature());
+		AnnounceStats(TMap<FString, FModularStatValue> { }, MissingFeature(), OnComplete);
 
 		return false;
 	}
 
 	if (!Account.IsValid() || !Target.IsValid())
 	{
-		OnComplete.ExecuteIfBound(TMap<FString, FModularStatValue> { }, NotSignedIn());
+		AnnounceStats(TMap<FString, FModularStatValue> { }, NotSignedIn(), OnComplete);
 
 		return false;
 	}
@@ -162,11 +169,11 @@ bool UModularStatsSubsystem::QueryStats(const int32 LocalPlayerIndex, const FMod
 	Params.TargetAccountId = Target;
 	Params.StatNames = StatNames;
 
-	StatsInterface->QueryStats(MoveTemp(Params)).OnComplete(this, [OnComplete](const UE::Online::TOnlineResult<UE::Online::FQueryStats>& Result)
+	StatsInterface->QueryStats(MoveTemp(Params)).OnComplete(this, [this, OnComplete](const UE::Online::TOnlineResult<UE::Online::FQueryStats>& Result)
 	{
 		if (Result.IsError())
 		{
-			OnComplete.ExecuteIfBound(TMap<FString, FModularStatValue> { }, FModularOnlineResult::FromOnlineError(Result.GetErrorValue()));
+			AnnounceStats(TMap<FString, FModularStatValue> { }, FModularOnlineResult::FromOnlineError(Result.GetErrorValue()), OnComplete);
 
 			return;
 		}
@@ -179,7 +186,7 @@ bool UModularStatsSubsystem::QueryStats(const int32 LocalPlayerIndex, const FMod
 			Stats.Emplace(Stat.Key, PoFigGames::Online::Private::FromStatValue(Stat.Value));
 		}
 
-		OnComplete.ExecuteIfBound(Stats, FModularOnlineResult::Success());
+		AnnounceStats(Stats, FModularOnlineResult::Success(), OnComplete);
 	});
 
 	return true;

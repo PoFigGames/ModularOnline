@@ -19,6 +19,9 @@ DECLARE_DELEGATE_OneParam(FModularServerLoginDelegate, const FModularOnlineResul
 /** The server signed in, or failed to. */
 DECLARE_MULTICAST_DELEGATE_OneParam(FModularServerLoginEvent, const FModularOnlineResult& /*Result*/);
 
+/** The Blueprint twin of the event above. */
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FModularServerLoginDynamic, const FModularOnlineResult&, Result);
+
 
 /**
  * @class UModularServerSubsystem
@@ -33,6 +36,10 @@ class UModularServerSubsystem : public UGameInstanceSubsystem
 public:
 	/** Fired when a server login finishes, successfully or not. */
 	FModularServerLoginEvent OnServerLoginComplete { };
+
+	/** What Blueprint binds to instead of the event above. */
+	UPROPERTY(BlueprintAssignable, Category = "ModularOnline|Server", meta = (DisplayName = "On Server Login Complete"))
+	FModularServerLoginDynamic K2_OnServerLoginComplete { };
 
 #pragma region UGameInstanceSubsystem
 
@@ -52,6 +59,9 @@ public:
 	MODULARONLINE_API UE::Online::FAccountId GetServerAccountId() const;
 
 protected:
+	/** Tells everyone watching how a server login ended. */
+	MODULARONLINE_API void AnnounceServerLogin(const FModularOnlineResult& Result, const FModularServerLoginDelegate& OnComplete);
+
 	/** The online layer, which owns the contexts. */
 	MODULARONLINE_API UModularOnlineSubsystem* GetOnline() const;
 

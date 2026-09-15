@@ -81,21 +81,21 @@ public:
 	UPROPERTY(Config, EditAnywhere, Category = "Matches")
 	EModularMatchBackendKind MatchBackend { EModularMatchBackendKind::Lobbies };
 
-	/** Schema a match is published under, as declared in the project's OnlineServices.Lobbies section. */
+	/** Schema a match is published under, as declared in the project's OnlineServices.Lobbies section. Unset hosts nothing. */
 	UPROPERTY(Config, EditAnywhere, Category = "Matches")
-	FString LobbySchemaId { TEXT("GameLobby") };
+	FString LobbySchemaId { };
 
-	/** Schema a match published as a session is created with, as the project declared it. */
+	/** Schema a match published as a session is created with, as the project declared it. Unset hosts nothing. */
 	UPROPERTY(Config, EditAnywhere, Category = "Matches")
-	FString SessionSchemaId { TEXT("GameSession") };
+	FString SessionSchemaId { };
 
-	/** Attribute a match publishes its name under. */
+	/** Attribute a match publishes its name under. Unset publishes no name. */
 	UPROPERTY(Config, EditAnywhere, Category = "Matches")
-	FName MatchNameAttribute { TEXT("Name") };
+	FName MatchNameAttribute { };
 
-	/** Attribute a match publishes its map under, for a browser and for presence. */
+	/** Attribute a match publishes its map under, for a browser and for presence. Unset publishes no map. */
 	UPROPERTY(Config, EditAnywhere, Category = "Matches")
-	FName MatchMapAttribute { TEXT("Map") };
+	FName MatchMapAttribute { };
 
 	/**
 	 * How a provider marks an attribute as its own; an attribute named this way is never removed.
@@ -109,10 +109,11 @@ public:
 	/**
 	 * Which attribute says how many are already in a match.
 	 *
-	 * Steam lists no members of a lobby nobody has joined. Empty shows every match as having room.
+	 * Steam listed no members of a lobby nobody has joined when this was checked on 2026-09-15. Empty shows
+	 * every match as having room.
 	 */
 	UPROPERTY(Config, EditAnywhere, Category = "Matches")
-	FName MatchMemberCountAttribute { TEXT("__memberCount") };
+	FName MatchMemberCountAttribute { };
 
 #pragma region UDeveloperSettings
 
@@ -152,11 +153,11 @@ public:
 
 	/** Attribute a match publishes the host's cross play answer under, so a browser can show it. */
 	UPROPERTY(Config, EditAnywhere, Category = "Cross Play")
-	FName MatchCrossPlayAttribute { TEXT("AllowCrossPlay") };
+	FName MatchCrossPlayAttribute { };
 
 	/** Attribute the second publication names the first by, so a browser does not show one match twice. */
 	UPROPERTY(Config, EditAnywhere, Category = "Cross Play")
-	FName MatchLinkAttribute { TEXT("LinkedMatchId") };
+	FName MatchLinkAttribute { };
 
 #pragma region UDeveloperSettings
 
@@ -181,16 +182,16 @@ class UModularAccountSettings : public UDeveloperSettings
 	GENERATED_BODY()
 
 public:
-	/** Attribute an avatar is published under, for providers not named below. Empty reads no avatars. */
+	/** Attribute an avatar is published under, for providers not named below. Unset reads no avatars. */
 	UPROPERTY(Config, EditAnywhere, Category = "Accounts")
-	FString DefaultAvatarAttribute { TEXT("AvatarUrl") };
+	FName DefaultAvatarAttribute { };
 
 	/** Avatar attribute per provider, keyed by its name as EOnlineServices spells it. */
 	UPROPERTY(Config, EditAnywhere, Category = "Accounts")
-	TMap<FString, FString> AvatarAttributeByProvider { };
+	TMap<FString, FName> AvatarAttributeByProvider { };
 
 	/** The attribute an avatar is published under on a provider, falling back to the default. */
-	MODULARONLINE_API FString GetAvatarAttribute(const FString& ProviderName) const;
+	MODULARONLINE_API FName GetAvatarAttribute(const FString& ProviderName) const;
 
 #pragma region UDeveloperSettings
 
@@ -233,7 +234,8 @@ struct FModularPresenceState
 	 * The status the provider renders, in that provider's own terms.
 	 *
 	 * On Steam this is a rich presence localisation token the application has declared; a token it has
-	 * not declared shows as nothing at all, which is why this is a name and not a sentence.
+	 * not declared showed as nothing at all when this was checked on 2026-09-15, which is why this is a
+	 * name and not a sentence.
 	 */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "ModularOnline")
 	FString Status { };

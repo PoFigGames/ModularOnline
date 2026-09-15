@@ -30,7 +30,7 @@ namespace PoFigGames::Online::Private
 
 UAsyncAction_ModularHostMatch* UAsyncAction_ModularHostMatch::HostMatch(const UObject* WorldContextObject, FModularMatchSettings Settings, const int32 LocalPlayerIndex)
 {
-	UGameInstance* GameInstance = nullptr;
+	UGameInstance* GameInstance { nullptr };
 	const auto Subsystem = PoFigGames::Online::Private::FindMatches(WorldContextObject, GameInstance);
 
 	const auto Action = MakeNode<UAsyncAction_ModularHostMatch>(GameInstance);
@@ -62,7 +62,7 @@ void UAsyncAction_ModularHostMatch::Activate()
 
 UAsyncAction_ModularJoinMatch* UAsyncAction_ModularJoinMatch::JoinMatch(const UObject* WorldContextObject, FModularMatchHandle Match, const int32 LocalPlayerIndex)
 {
-	UGameInstance* GameInstance = nullptr;
+	UGameInstance* GameInstance { nullptr };
 	const auto Subsystem = PoFigGames::Online::Private::FindMatches(WorldContextObject, GameInstance);
 
 	const auto Action = MakeNode<UAsyncAction_ModularJoinMatch>(GameInstance);
@@ -94,7 +94,7 @@ void UAsyncAction_ModularJoinMatch::Activate()
 
 UAsyncAction_ModularFindMatches* UAsyncAction_ModularFindMatches::FindMatches(const UObject* WorldContextObject, FModularMatchSearchParams Params, const int32 LocalPlayerIndex)
 {
-	UGameInstance* GameInstance = nullptr;
+	UGameInstance* GameInstance { nullptr };
 	const auto Subsystem = PoFigGames::Online::Private::FindMatches(WorldContextObject, GameInstance);
 
 	const auto Action = MakeNode<UAsyncAction_ModularFindMatches>(GameInstance);

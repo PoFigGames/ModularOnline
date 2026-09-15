@@ -23,6 +23,21 @@ DECLARE_DELEGATE_TwoParams(FModularCheckoutDelegate, const FString& /*Transactio
 DECLARE_DELEGATE_OneParam(FModularStoreOperationDelegate, const FModularOnlineResult& /*Result*/);
 
 /** A purchase went through, whoever started it. */
+/** The answer to a query this subsystem was asked for; what it fetched is in the cache. */
+DECLARE_MULTICAST_DELEGATE_TwoParams(FModularOffersQueriedEvent, const TArray<FModularStoreOffer>& /*Offers*/, const FModularOnlineResult& /*Result*/);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FModularOffersQueriedDynamic, const TArray<FModularStoreOffer>&, Offers, const FModularOnlineResult&, Result);
+
+DECLARE_MULTICAST_DELEGATE_TwoParams(FModularEntitlementsQueriedEvent, const TArray<FModularEntitlement>& /*Entitlements*/, const FModularOnlineResult& /*Result*/);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FModularEntitlementsQueriedDynamic, const TArray<FModularEntitlement>&, Entitlements, const FModularOnlineResult&, Result);
+
+/** The answer to a checkout this subsystem started, which a purchase made elsewhere is not. */
+DECLARE_MULTICAST_DELEGATE_TwoParams(FModularCheckoutAnsweredEvent, const FString& /*TransactionId*/, const FModularOnlineResult& /*Result*/);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FModularCheckoutAnsweredDynamic, const FString&, TransactionId, const FModularOnlineResult&, Result);
+
+/** An entitlement was redeemed, or was not. */
+DECLARE_MULTICAST_DELEGATE_OneParam(FModularRedeemAnsweredEvent, const FModularOnlineResult& /*Result*/);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FModularRedeemAnsweredDynamic, const FModularOnlineResult&, Result);
+
 DECLARE_MULTICAST_DELEGATE_TwoParams(FModularPurchaseCompletedEvent, const FModularAccountHandle& /*AccountId*/, const FString& /*TransactionId*/);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FModularPurchaseCompletedDynamic, const FModularAccountHandle&, AccountId, const FString&, TransactionId);
 
@@ -41,7 +56,19 @@ public:
 	/** Fired when a purchase completes, including one this game never started. */
 	FModularPurchaseCompletedEvent OnPurchaseCompleted { };
 
-#pragma region UModularFeatureSubsystem
+/** Fired when a query for offers finishes. */
+	FModularOffersQueriedEvent OnOffersQueried { };
+
+	/** Fired when a query for entitlements finishes. */
+	FModularEntitlementsQueriedEvent OnEntitlementsQueried { };
+
+	/** Fired when a checkout this subsystem started finishes. */
+	FModularCheckoutAnsweredEvent OnCheckoutAnswered { };
+
+	/** Fired when a redemption finishes. */
+	FModularRedeemAnsweredEvent OnRedeemAnswered { };
+
+	#pragma region UModularFeatureSubsystem
 
 	MODULARONLINE_API virtual void Deinitialize() override;
 	MODULARONLINE_API virtual FGameplayTag GetFeatureTag() const override;
@@ -70,6 +97,27 @@ public:
 	MODULARONLINE_API virtual bool ShowStoreUI(int32 LocalPlayerIndex);
 
 protected:
+	/** The same events, for Blueprint. */
+	UPROPERTY(BlueprintAssignable, Category = "ModularOnline|Store", meta = (DisplayName = "On Offers Queried"))
+	FModularOffersQueriedDynamic K2_OnOffersQueried { };
+
+	UPROPERTY(BlueprintAssignable, Category = "ModularOnline|Store", meta = (DisplayName = "On Entitlements Queried"))
+	FModularEntitlementsQueriedDynamic K2_OnEntitlementsQueried { };
+
+	UPROPERTY(BlueprintAssignable, Category = "ModularOnline|Store", meta = (DisplayName = "On Checkout Answered"))
+	FModularCheckoutAnsweredDynamic K2_OnCheckoutAnswered { };
+
+	UPROPERTY(BlueprintAssignable, Category = "ModularOnline|Store", meta = (DisplayName = "On Redeem Answered"))
+	FModularRedeemAnsweredDynamic K2_OnRedeemAnswered { };
+
+	/** Each answers on the caller's delegate and on both events. */
+	MODULARONLINE_API void AnnounceOffers(const TArray<FModularStoreOffer>& Offers, const FModularOnlineResult& Result, const FModularStoreOffersDelegate& OnComplete);
+
+	MODULARONLINE_API void AnnounceEntitlements(const TArray<FModularEntitlement>& Entitlements, const FModularOnlineResult& Result, const FModularEntitlementsDelegate& OnComplete);
+
+	MODULARONLINE_API void AnnounceCheckout(const FString& TransactionId, const FModularOnlineResult& Result, const FModularCheckoutDelegate& OnComplete);
+
+	MODULARONLINE_API void AnnounceRedeemed(const FModularOnlineResult& Result, const FModularStoreOperationDelegate& OnComplete);
 	/** The same event, for Blueprint. */
 	UPROPERTY(BlueprintAssignable, Category = "ModularOnline|Store", meta = (DisplayName = "On Purchase Completed"))
 	FModularPurchaseCompletedDynamic K2_OnPurchaseCompleted { };

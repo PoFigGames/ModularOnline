@@ -5,6 +5,7 @@
 #include "Engine/Engine.h"
 #include "Engine/GameInstance.h"
 #include "Engine/NetDriver.h"
+#include "Engine/PendingNetGame.h"
 #include "Engine/World.h"
 #include "GameFramework/PlayerController.h"
 #include "Match/ModularLobbyBackend.h"
@@ -34,6 +35,35 @@ namespace PoFigGames::Online::Private
 {
 	/** Local name every match of this plugin is created under. */
 	static const FName MatchLocalName { TEXT("GameSession") };
+
+	/**
+	 * Whether an address a provider answered with is one this client may travel to.
+	 *
+	 * The string is remote data: on every provider it is assembled from what the host published, so it
+	 * reaches here the way any other field of a stranger's match does. Its shape differs per provider -
+	 * an IP and port, a relay identity - so what is checked is that it is an address and nothing more.
+	 * Travel options are the game's to add in OnPreClientTravel; one arriving from a match is a host
+	 * appending to somebody else's URL.
+	 */
+	static bool IsTravellableAddress(const FString& Address)
+	{
+		if (Address.IsEmpty() || Address.Len() > 256)
+		{
+			return false;
+		}
+
+		for (const auto Character : Address)
+		{
+			const auto bCarriesOptions = Character == TEXT('?') || Character == TEXT('#');
+
+			if (FChar::IsWhitespace(Character) || FChar::IsControl(Character) || bCarriesOptions)
+			{
+				return false;
+			}
+		}
+
+		return true;
+	}
 
 	/** What the services call a leave reason, in the words of this plugin. */
 	static EModularMatchLeaveReason FromLobbyLeaveReason(const UE::Online::ELobbyMemberLeaveReason Reason)
@@ -141,9 +171,8 @@ TSharedPtr<IModularMatchBackend> UModularMatchSubsystem::MakeBackend(const EModu
 		return nullptr;
 	}
 
-	// What carries a match is the project's decision, taken in the settings. If the provider of this
-	// platform has no such component, matches do not work here and every call says so by name - which is
-	// an answer somebody can act on, unlike a match that quietly became the other kind.
+	// What carries a match is the project's decision, taken in the settings. A provider without that
+	// component refuses every call by name rather than quietly becoming the other kind.
 	TSharedPtr<IModularMatchBackend> Chosen;
 
 	switch (Kind)
@@ -215,9 +244,8 @@ void UModularMatchSubsystem::SelectBackend() const
 		bEventsBound = false;
 	}
 
-	// And it cannot be answered before there are any services to choose from. The frontend asks to leave
-	// a match before anybody has signed in, and latching "no backend" at that moment would leave this
-	// whole game instance unable to host or search for the rest of its life.
+	// And not before there are services to choose from: the frontend asks to leave a match before anybody
+	// signed in, and latching "no backend" then would cost this game instance hosting for good.
 	if (!Online->HasAnyProvider())
 	{
 		bBackendChosen = false;
@@ -286,9 +314,8 @@ bool UModularMatchSubsystem::CanPlayerCrossPlay(const int32 LocalPlayerIndex) co
 		return false;
 	}
 
-	// Anything other than a plain yes is a no. The privilege exists because a platform or a parent can
-	// forbid cross play outright, and a maybe there is not something a match can be built on.
-	// Asked of the platform, which is where the login asked it and where a gate on cross play lives.
+	// Anything other than a plain yes is a no: a platform or a parent can forbid cross play outright.
+	// Asked of the platform, which is where the login asked it and where such a gate lives.
 	return User->GetPrivilege(EModularOnlinePrivilege::CanUseCrossPlay, EModularOnlineRole::Platform) == EModularOnlinePrivilegeResult::Available;
 }
 
@@ -396,12 +423,17 @@ FModularMatchSettings UModularMatchSubsystem::DescribeForPublication(const FModu
 
 	if (const auto Configured = GetDefault<UModularCrossPlaySettings>())
 	{
+		const auto bPublishesCrossPlay = Configured->CrossPlayPolicy == EModularCrossPlayPolicy::BothRoles;
+
 		// Published, because the only reader that matters is somebody else's search. A match with a single
 		// publication says nothing about cross play: a project on one role need not carry the attribute.
-		if (!Configured->MatchCrossPlayAttribute.IsNone() && Configured->CrossPlayPolicy == EModularCrossPlayPolicy::BothRoles)
+		if (bPublishesCrossPlay && !Configured->MatchCrossPlayAttribute.IsNone())
 		{
 			Described.Attributes.Emplace(Configured->MatchCrossPlayAttribute, bCrossPlay ? TEXT("1") : TEXT("0"));
 		}
+
+		UE_CLOG(bPublishesCrossPlay && Configured->MatchCrossPlayAttribute.IsNone(), LogModularOnline, Error,
+			TEXT("Cross play is on and MatchCrossPlayAttribute names nothing; every search will narrow itself on an answer this match never published."));
 
 		if (!Configured->MatchLinkAttribute.IsNone() && !LinkedMatchId.IsEmpty())
 		{
@@ -462,6 +494,17 @@ void UModularMatchSubsystem::MergeMatches(TArray<FModularMatchInfo>& Matches, co
 
 bool UModularMatchSubsystem::HostMatch(const int32 LocalPlayerIndex, const FModularMatchSettings& Settings, FModularMatchOperationDelegate OnComplete)
 {
+	bDepartureAnnounced = false;
+
+	if (const auto Waiting = RefuseWhileTravelling(); !Waiting.bWasSuccessful)
+	{
+		OnComplete.ExecuteIfBound(Waiting);
+		OnMatchCreated.Broadcast(Waiting);
+		K2_OnMatchCreated.Broadcast(Waiting);
+
+		return false;
+	}
+
 	if (FText Error; !Settings.Validate(Error))
 	{
 		auto Result = FModularOnlineResult::FromOnlineError(UE::Online::Errors::InvalidParams());
@@ -509,9 +552,8 @@ bool UModularMatchSubsystem::HostMatch(const int32 LocalPlayerIndex, const FModu
 	SelectBackend();
 	BindMatchEvents();
 
-	// Cross play has to be wanted by the project, by the host and by the account. Any of the three
-	// saying no means the same thing: this match lives on the platform's own role and is never published
-	// where somebody on another platform could find it.
+	// Cross play has to be wanted by the project, by the host and by the account; any no means the match
+	// lives on the platform's own role and is published nowhere else.
 	const auto bMirror = ShouldMirrorMatch(IsPublishingOnBothRoles(), Settings.bAllowCrossPlay, CanPlayerCrossPlay(LocalPlayerIndex));
 	const auto bCompanionOnly = !bMirror && IsPublishingOnBothRoles();
 	const auto PrimaryRole = bCompanionOnly ? GetCompanionMatchRole() : GetMatchRole();
@@ -525,13 +567,15 @@ bool UModularMatchSubsystem::HostMatch(const int32 LocalPlayerIndex, const FModu
 	}
 
 	FModularMatchContext Context;
-	if (!PrimaryBackend.IsValid() || !BuildContext(LocalPlayerIndex, PrimaryRole, Context))
-	{
-		const auto Result = GetMissingBackendResult();
 
-		OnComplete.ExecuteIfBound(Result);
-		OnMatchCreated.Broadcast(Result);
-		K2_OnMatchCreated.Broadcast(Result);
+	if (const auto Refusal = BuildContextOrRefusal(LocalPlayerIndex, PrimaryRole, PrimaryBackend, Context); !Refusal.bWasSuccessful)
+	{
+		// Nothing was opened, so nothing is waiting to be travelled to.
+		PendingTravelURL.Reset();
+
+		OnComplete.ExecuteIfBound(Refusal);
+		OnMatchCreated.Broadcast(Refusal);
+		K2_OnMatchCreated.Broadcast(Refusal);
 
 		return false;
 	}
@@ -597,6 +641,9 @@ void UModularMatchSubsystem::CompleteHostedMatch(const FModularOnlineResult& Res
 
 	if (!Result.bWasSuccessful)
 	{
+		// Nothing was opened, so the address it would have travelled to is not waiting for anybody.
+		PendingTravelURL.Reset();
+
 		UE_LOG(LogModularOnline, Error, TEXT("The match could not be opened: %s"), *Result.ToLogString());
 
 		return;
@@ -628,9 +675,10 @@ bool UModularMatchSubsystem::FindMatches(const int32 LocalPlayerIndex, const FMo
 	const auto FirstBackend = GetBackendForRole(FirstRole);
 
 	FModularMatchContext Context;
-	if (!FirstBackend.IsValid() || !BuildContext(LocalPlayerIndex, FirstRole, Context))
+
+	if (const auto Refusal = BuildContextOrRefusal(LocalPlayerIndex, FirstRole, FirstBackend, Context); !Refusal.bWasSuccessful)
 	{
-		OnComplete.ExecuteIfBound(GetMissingBackendResult(), TArray<FModularMatchInfo> { });
+		OnComplete.ExecuteIfBound(Refusal, TArray<FModularMatchInfo> { });
 
 		return false;
 	}
@@ -639,18 +687,23 @@ bool UModularMatchSubsystem::FindMatches(const int32 LocalPlayerIndex, const FMo
 
 	FirstBackend->FindMatches(Context, Params, FModularMatchSearchDelegate::CreateWeakLambda(this, [this, LocalPlayerIndex, Params, FirstRole, bSearchBothRoles, OnComplete](const FModularOnlineResult& Result, const TArray<FModularMatchInfo>& Found)
 	{
-		auto Matches = Found;
+		// A match on the cross platform role that refuses cross play is reached through the other role
+		// instead, so it is never copied out of the answer. Asked of a project that publishes once, this
+		// would empty every search, which is why it only applies when both roles were searched.
+		const auto bDropsWithoutCrossPlay = FirstRole == GetMatchRole() && bSearchBothRoles;
 
-		for (auto& Match : Matches)
-		{
-			DescribeFoundMatch(Match, FirstRole);
-		}
+		TArray<FModularMatchInfo> Matches;
+		Matches.Reserve(Found.Num());
 
-		if (FirstRole == GetMatchRole() && bSearchBothRoles)
+		for (const auto& Match : Found)
 		{
-			// A match on the cross platform role that refuses cross play is reached through the other role
-			// instead. Asked of a project that publishes once, this would empty every search.
-			Matches.RemoveAll([](const FModularMatchInfo& Match) { return !Match.bAllowsCrossPlay; });
+			auto& Described = Matches.Add_GetRef(Match);
+			DescribeFoundMatch(Described, FirstRole);
+
+			if (bDropsWithoutCrossPlay && !Described.bAllowsCrossPlay)
+			{
+				Matches.Pop(EAllowShrinking::No);
+			}
 		}
 
 		FModularMatchContext CompanionContext;
@@ -662,7 +715,9 @@ bool UModularMatchSubsystem::FindMatches(const int32 LocalPlayerIndex, const FMo
 			return;
 		}
 
-		CompanionBackend->FindMatches(CompanionContext, Params, FModularMatchSearchDelegate::CreateWeakLambda(this, [this, Params, Matches = MoveTemp(Matches), OnComplete](const FModularOnlineResult& CompanionResult, const TArray<FModularMatchInfo>& CompanionFound) mutable
+		const auto MaxResults = Params.MaxResults;
+
+		CompanionBackend->FindMatches(CompanionContext, Params, FModularMatchSearchDelegate::CreateWeakLambda(this, [this, MaxResults, Matches = MoveTemp(Matches), OnComplete](const FModularOnlineResult& CompanionResult, const TArray<FModularMatchInfo>& CompanionFound) mutable
 		{
 			// The second role failing is not the search failing: what the first one found is still real,
 			// and a browser that showed nothing because one of two backends was down would be lying.
@@ -675,14 +730,15 @@ bool UModularMatchSubsystem::FindMatches(const int32 LocalPlayerIndex, const FMo
 				return;
 			}
 
-			auto Companion = CompanionFound;
+			// Merged first and described after: the merge reads ids and attributes, which describing does
+			// not touch, so only what is actually listed is walked and no second copy is made.
+			const auto Listed = Matches.Num();
+			MergeMatches(Matches, CompanionFound, MaxResults);
 
-			for (auto& Match : Companion)
+			for (auto Index = Listed; Index < Matches.Num(); ++Index)
 			{
-				DescribeFoundMatch(Match, GetCompanionMatchRole());
+				DescribeFoundMatch(Matches[Index], GetCompanionMatchRole());
 			}
-
-			MergeMatches(Matches, Companion, Params.MaxResults);
 
 			OnComplete.ExecuteIfBound(FModularOnlineResult::Success(), Matches);
 		}));
@@ -696,45 +752,55 @@ bool UModularMatchSubsystem::JoinMatch(const int32 LocalPlayerIndex, const FModu
 	SelectBackend();
 	BindMatchEvents();
 
+	// Being in a match again is what makes the next departure worth announcing. A host is never told it
+	// joined its own lobby, and a session backend announces no join at all, so it is said here.
+	bDepartureAnnounced = false;
+
 	const auto JoinBackend = GetBackendForRole(Match.Role);
 
 	FModularMatchContext Context;
-	if (!JoinBackend.IsValid() || !BuildContext(LocalPlayerIndex, Match.Role, Context))
-	{
-		const auto Result = GetMissingBackendResult();
 
-		OnComplete.ExecuteIfBound(Result);
-		OnMatchJoined.Broadcast(Result);
-		K2_OnMatchJoined.Broadcast(Result);
+	if (const auto Refusal = BuildContextOrRefusal(LocalPlayerIndex, Match.Role, JoinBackend, Context); !Refusal.bWasSuccessful)
+	{
+		AnswerJoin(Refusal, OnComplete);
 
 		return false;
 	}
 
 	if (!Match.IsValid())
 	{
-		const auto Result = FModularOnlineResult::FromOnlineError(UE::Online::Errors::InvalidParams());
-
-		OnComplete.ExecuteIfBound(Result);
-		OnMatchJoined.Broadcast(Result);
-		K2_OnMatchJoined.Broadcast(Result);
+		AnswerJoin(FModularOnlineResult::FromOnlineError(UE::Online::Errors::InvalidParams()), OnComplete);
 
 		return false;
 	}
 
 	JoinBackend->JoinMatch(Context, Match, true, FModularMatchOperationDelegate::CreateWeakLambda(this, [this, LocalPlayerIndex, OnComplete](const FModularOnlineResult& Result)
 	{
-		OnComplete.ExecuteIfBound(Result);
-		OnMatchJoined.Broadcast(Result);
-		K2_OnMatchJoined.Broadcast(Result);
-
-		if (Result.bWasSuccessful)
-		{
-			TravelToJoinedMatch(LocalPlayerIndex);
-		}
-		else
+		if (!Result.bWasSuccessful)
 		{
 			UE_LOG(LogModularOnline, Error, TEXT("The match could not be joined: %s"), *Result.ToLogString());
+
+			AnswerJoin(Result, OnComplete);
+
+			return;
 		}
+
+		// A lobby is findable before the host's server is bound to it. Answering success then would leave
+		// the player in a lobby they cannot reach, waiting for an address that arrives on no event.
+		FString TravelURL;
+
+		if (const auto Reached = ResolveJoinedMatch(LocalPlayerIndex, TravelURL); !Reached.bWasSuccessful)
+		{
+			UE_LOG(LogModularOnline, Error, TEXT("The match was joined but cannot be reached: %s"), *Reached.ToLogString());
+
+			LeaveMatch(LocalPlayerIndex);
+			AnswerJoin(Reached, OnComplete);
+
+			return;
+		}
+
+		AnswerJoin(Result, OnComplete);
+		TravelToJoinedMatch(LocalPlayerIndex, TravelURL);
 	}));
 
 	return true;
@@ -750,6 +816,25 @@ bool UModularMatchSubsystem::TravelMatchTo(const int32 LocalPlayerIndex, const F
 	{
 		// A client does not decide where anybody plays; it is taken there.
 		OnComplete.ExecuteIfBound(FModularOnlineResult::FromOnlineError(UE::Online::Errors::InvalidState()));
+
+		return false;
+	}
+
+	if (const auto Waiting = RefuseWhileTravelling(); !Waiting.bWasSuccessful)
+	{
+		OnComplete.ExecuteIfBound(Waiting);
+
+		return false;
+	}
+
+	if (FText Error; !Settings.Validate(Error))
+	{
+		auto Refusal = FModularOnlineResult::FromOnlineError(UE::Online::Errors::InvalidParams());
+		Refusal.ErrorText = Error;
+
+		UE_LOG(LogModularOnline, Warning, TEXT("TravelMatchTo refused: %s"), *Error.ToString());
+
+		OnComplete.ExecuteIfBound(Refusal);
 
 		return false;
 	}
@@ -799,6 +884,12 @@ bool UModularMatchSubsystem::LeaveMatch(const int32 LocalPlayerIndex, FModularMa
 
 	// Both publications go, and the caller hears about one of them. Leaving only the role we happen to
 	// look at first would leave a match advertised that nobody is in any more.
+
+	/**
+	 * @struct FLeaving
+	 *
+	 * @brief One publication to leave: which backend carries it, for whom, and on which role.
+	 */
 	struct FLeaving
 	{
 		TSharedPtr<PoFigGames::Online::IModularMatchBackend> Backend { nullptr };
@@ -830,9 +921,8 @@ bool UModularMatchSubsystem::LeaveMatch(const int32 LocalPlayerIndex, FModularMa
 		return true;
 	}
 
-	// Answered by the publication that carried the game where there is one, and otherwise by whichever is
-	// left - the caller asked to be out and is owed an answer either way, and it has to be a real one
-	// rather than a success invented while the services are still working.
+	// Answered by the publication that carried the game where there is one, otherwise by whichever is
+	// left: a real answer either way, never a success invented while the services are still working.
 	const auto Answering = Leaving.IndexOfByPredicate([this](const FLeaving& Entry) { return Entry.Role == GetMatchRole(); });
 	const auto AnsweringIndex = Answering == INDEX_NONE ? 0 : Answering;
 
@@ -851,9 +941,9 @@ bool UModularMatchSubsystem::AddressTarget(const int32 LocalPlayerIndex, const E
 {
 	const auto RoleBackend = GetBackendForRole(Role);
 
-	if (!RoleBackend.IsValid() || !BuildContext(LocalPlayerIndex, Role, OutContext))
+	if (const auto Refusal = BuildContextOrRefusal(LocalPlayerIndex, Role, RoleBackend, OutContext); !Refusal.bWasSuccessful)
 	{
-		OnComplete.ExecuteIfBound(GetMissingBackendResult());
+		OnComplete.ExecuteIfBound(Refusal);
 
 		return false;
 	}
@@ -886,9 +976,8 @@ bool UModularMatchSubsystem::InviteToMatch(const int32 LocalPlayerIndex, const F
 {
 	SelectBackend();
 
-	// Invitations belong to the companion role wherever there is one: it is the platform's own, and an
-	// invitation the platform did not send is one its overlay, its notifications and its friends list
-	// know nothing about. With one publication there is nothing to choose.
+	// Invitations belong to the companion role wherever there is one: an invitation the platform did not
+	// send is one its overlay, notifications and friends list know nothing about.
 	const auto Role = IsPublishingOnBothRoles() ? GetCompanionMatchRole() : GetMatchRole();
 	const auto RoleBackend = GetBackendForRole(Role);
 
@@ -927,7 +1016,11 @@ bool UModularMatchSubsystem::KickMember(const int32 LocalPlayerIndex, const FMod
 	{
 		// The same account, asked of the other publication: an id belongs to the provider that issued it,
 		// so the companion role only knows this player when both publications are that provider's.
-		CompanionBackend->KickMember(CompanionContext, Target, FModularMatchOperationDelegate { });
+		CompanionBackend->KickMember(CompanionContext, Target, FModularMatchOperationDelegate::CreateWeakLambda(this, [](const FModularOnlineResult& Result)
+		{
+			UE_CLOG(!Result.bWasSuccessful, LogModularOnline, Warning,
+				TEXT("The companion publication did not remove the player: %s. It still believes they are in the match."), *Result.ToLogString());
+		}));
 	}
 
 	return true;
@@ -943,7 +1036,8 @@ bool UModularMatchSubsystem::UpdateMatchSettings(const int32 LocalPlayerIndex, c
 
 	if (!FindActiveMatch(LocalPlayerIndex, ActiveRole, Context, Match))
 	{
-		OnComplete.ExecuteIfBound(GetMissingBackendResult());
+		// Not a platform that cannot publish: there is simply no match of ours to change.
+		OnComplete.ExecuteIfBound(FModularOnlineResult::FromOnlineError(UE::Online::Errors::InvalidState()));
 
 		return false;
 	}
@@ -975,6 +1069,11 @@ bool UModularMatchSubsystem::GetCurrentMatch(const int32 LocalPlayerIndex, FModu
 
 void UModularMatchSubsystem::TravelToHostedMap()
 {
+	// Cleared on every path out of here, including the ones that cannot travel: an address left behind
+	// would refuse every later request as one already in flight.
+	const FString Address { MoveTemp(PendingTravelURL) };
+	PendingTravelURL.Reset();
+
 	const auto World = GetWorld();
 	if (!World)
 	{
@@ -990,20 +1089,63 @@ void UModularMatchSubsystem::TravelToHostedMap()
 		return;
 	}
 
-	if (PendingTravelURL.IsEmpty())
+	if (Address.IsEmpty())
 	{
 		UE_LOG(LogModularOnline, Error, TEXT("The match was opened without a map to travel to."));
 
 		return;
 	}
 
-	UE_LOG(LogModularOnline, Log, TEXT("Travelling to the hosted map: %s"), *PendingTravelURL);
+	UE_LOG(LogModularOnline, Log, TEXT("Travelling to the hosted map: %s"), *Address);
 
-	World->ServerTravel(PendingTravelURL);
-	PendingTravelURL.Reset();
+	World->ServerTravel(Address);
 }
 
-void UModularMatchSubsystem::TravelToJoinedMatch(const int32 LocalPlayerIndex)
+void UModularMatchSubsystem::AnswerJoin(const FModularOnlineResult& Result, const FModularMatchOperationDelegate& OnComplete)
+{
+	OnComplete.ExecuteIfBound(Result);
+	OnMatchJoined.Broadcast(Result);
+	K2_OnMatchJoined.Broadcast(Result);
+}
+
+FModularOnlineResult UModularMatchSubsystem::ResolveJoinedMatch(const int32 LocalPlayerIndex, FString& OutTravelURL) const
+{
+	auto Role = EModularOnlineRole::Default;
+	FModularMatchContext Context;
+	FModularMatchHandle Match;
+
+	if (!FindActiveMatch(LocalPlayerIndex, Role, Context, Match))
+	{
+		return FModularOnlineResult::FromOnlineError(UE::Online::Errors::InvalidState());
+	}
+
+	UE::Online::FGetResolvedConnectString::Params Params;
+	Params.LocalAccountId = Context.LocalAccount;
+	Params.LobbyId = Match.LobbyId;
+	Params.SessionId = Match.SessionId;
+
+	const auto Resolved = Context.Services->GetResolvedConnectString(MoveTemp(Params));
+
+	if (!Resolved.IsOk())
+	{
+		return FModularOnlineResult::FromOnlineError(Resolved.GetErrorValue());
+	}
+
+	const auto& Address = Resolved.GetOkValue().ResolvedConnectString;
+
+	if (!PoFigGames::Online::Private::IsTravellableAddress(Address))
+	{
+		UE_LOG(LogModularOnline, Error, TEXT("The match answered with an address this client will not travel to: '%s'."), *Address);
+
+		return FModularOnlineResult::FromOnlineError(UE::Online::Errors::InvalidResults());
+	}
+
+	OutTravelURL = Address;
+
+	return FModularOnlineResult::Success();
+}
+
+void UModularMatchSubsystem::TravelToJoinedMatch(const int32 LocalPlayerIndex, const FString& TravelURL)
 {
 	const auto GameInstance = GetGameInstance();
 	const auto PlayerController = GameInstance ? GameInstance->GetLocalPlayerByIndex(LocalPlayerIndex) : nullptr;
@@ -1016,38 +1158,14 @@ void UModularMatchSubsystem::TravelToJoinedMatch(const int32 LocalPlayerIndex)
 		return;
 	}
 
-	auto Role = EModularOnlineRole::Default;
-	FModularMatchContext Context;
-	FModularMatchHandle Match;
-
-	if (!FindActiveMatch(LocalPlayerIndex, Role, Context, Match))
-	{
-		UE_LOG(LogModularOnline, Error, TEXT("The match was joined, but the services no longer report it."));
-
-		return;
-	}
-
-	UE::Online::FGetResolvedConnectString::Params Params;
-	Params.LocalAccountId = Context.LocalAccount;
-	Params.LobbyId = Match.LobbyId;
-	Params.SessionId = Match.SessionId;
-
-	const auto Resolved = Context.Services->GetResolvedConnectString(MoveTemp(Params));
-	if (!Resolved.IsOk())
-	{
-		UE_LOG(LogModularOnline, Error, TEXT("The match has no address to travel to: %s"), *ToLogString(Resolved.GetErrorValue()));
-
-		return;
-	}
-
 	// The game gets the last word on the address: an encryption token and anything else only it knows
 	// has to be on the URL before the travel, and there is no second chance afterwards.
-	auto TravelURL = Resolved.GetOkValue().ResolvedConnectString;
-	OnPreClientTravel.Broadcast(TravelURL);
+	auto Address = TravelURL;
+	OnPreClientTravel.Broadcast(Address);
 
 	UE_LOG(LogModularOnline, Log, TEXT("Travelling to the joined match."));
 
-	Controller->ClientTravel(TravelURL, TRAVEL_Absolute);
+	Controller->ClientTravel(Address, TRAVEL_Absolute);
 }
 
 void UModularMatchSubsystem::BindMatchEvents()
@@ -1059,9 +1177,8 @@ void UModularMatchSubsystem::BindMatchEvents()
 		return;
 	}
 
-	// Both publications are listened to, not only the one that carries the game. An invitation and a join
-	// asked for in the platform's own overlay arrive on the platform role, which is where a companion
-	// publication lives - heard on the match role only, neither ever reaches the game.
+	// Both publications are listened to: an invitation or a join asked for in the platform's own overlay
+	// arrives on the platform role, and heard on the match role alone it would never reach the game.
 	TSet<EModularOnlineRole> Bound;
 
 	for (const auto Named : { GetMatchRole(), GetCompanionMatchRole() })
@@ -1077,10 +1194,12 @@ void UModularMatchSubsystem::BindMatchEvents()
 			// so no services instance of this game instance, while subsystems are being initialised.
 			bEventsBound = true;
 
-			MatchEventHandles.Add(Lobbies->OnLobbyJoined().Add(this, &ThisClass::HandleLobbyJoined));
-			MatchEventHandles.Add(Lobbies->OnLobbyLeft().Add(this, &ThisClass::HandleLobbyLeft));
-			MatchEventHandles.Add(Lobbies->OnLobbyMemberJoined().Add(this, &ThisClass::HandleLobbyMemberJoined));
-			MatchEventHandles.Add(Lobbies->OnLobbyMemberLeft().Add(this, &ThisClass::HandleLobbyMemberLeft));
+			// The role travels with all of them: whether a member is the local player is a question about
+			// the role whose lobby this is, and an account of one provider means nothing to another.
+			MatchEventHandles.Add(Lobbies->OnLobbyJoined().Add(this, &ThisClass::HandleLobbyJoined, Named));
+			MatchEventHandles.Add(Lobbies->OnLobbyLeft().Add(this, &ThisClass::HandleLobbyLeft, Named));
+			MatchEventHandles.Add(Lobbies->OnLobbyMemberJoined().Add(this, &ThisClass::HandleLobbyMemberJoined, Named));
+			MatchEventHandles.Add(Lobbies->OnLobbyMemberLeft().Add(this, &ThisClass::HandleLobbyMemberLeft, Named));
 
 			// The role travels with these two, because joining has to go back to the publication the match
 			// was offered through: a handle taken to the other role names nothing there.
@@ -1110,48 +1229,106 @@ void UModularMatchSubsystem::BindMatchEvents()
 	}
 }
 
-void UModularMatchSubsystem::HandleLobbyJoined(const UE::Online::FLobbyJoined& EventParameters)
+bool UModularMatchSubsystem::IsOurLobby(const UE::Online::FLobby& Lobby)
 {
-	UE_LOG(LogModularOnline, Log, TEXT("Joined match %s."), *ToLogString(EventParameters.Lobby->LobbyId));
+	// These events carry every lobby of the services, including one a project joined for something else.
+	return Lobby.LocalName == PoFigGames::Online::Private::MatchLocalName;
 }
 
-void UModularMatchSubsystem::HandleLobbyLeft(const UE::Online::FLobbyLeft& EventParameters)
+bool UModularMatchSubsystem::IsLocalAccount(const EModularOnlineRole Role, const UE::Online::FAccountId& AccountId) const
 {
-	UE_LOG(LogModularOnline, Log, TEXT("Left match %s."), *ToLogString(EventParameters.Lobby->LobbyId));
-
-	// The services do not say why the local player is out here; a member leave event does, and arrives
-	// first when there was a reason other than leaving.
-	OnMatchLeft.Broadcast(EModularMatchLeaveReason::Left);
-	K2_OnMatchLeft.Broadcast(EModularMatchLeaveReason::Left);
-}
-
-void UModularMatchSubsystem::HandleLobbyMemberJoined(const UE::Online::FLobbyMemberJoined& EventParameters)
-{
-	// Somebody arriving is not somebody leaving, and the reason a member event carries only means anything
-	// when they went.
-	const auto Member = MakeModularAccount(EventParameters.Member->AccountId);
-
-	OnMemberJoined.Broadcast(Member, EModularMatchLeaveReason::None);
-	K2_OnMemberJoined.Broadcast(Member, EModularMatchLeaveReason::None);
-}
-
-void UModularMatchSubsystem::HandleLobbyMemberLeft(const UE::Online::FLobbyMemberLeft& EventParameters)
-{
-	const auto Reason = PoFigGames::Online::Private::FromLobbyLeaveReason(EventParameters.Reason);
-	const auto MemberId = MakeModularAccount(EventParameters.Member->AccountId);
-
-	OnMemberLeft.Broadcast(MemberId, Reason);
-	K2_OnMemberLeft.Broadcast(MemberId, Reason);
-
-	// When the member who left is us, this is also how the game learns it was kicked or that the host
-	// closed the match, which the plain left event cannot tell apart.
 	const auto Users = GetUsers();
-	const auto LocalUser = Users ? Users->GetUserForLocalPlayerIndex(0) : nullptr;
 
-	if (LocalUser && LocalUser->GetAccountId(GetMatchRole()) == EventParameters.Member->AccountId && Reason != EModularMatchLeaveReason::Left)
+	if (!Users || !AccountId.IsValid())
 	{
-		OnMatchLeft.Broadcast(Reason);
-		K2_OnMatchLeft.Broadcast(Reason);
+		return false;
+	}
+
+	for (const auto User : Users->GetAllUsers())
+	{
+		if (User && User->GetAccountId(Role) == AccountId)
+		{
+			return true;
+		}
+	}
+
+	return false;
+}
+
+void UModularMatchSubsystem::AnnounceDeparture(const EModularMatchLeaveReason Reason)
+{
+	if (bDepartureAnnounced)
+	{
+		return;
+	}
+
+	bDepartureAnnounced = true;
+
+	OnMatchLeft.Broadcast(Reason);
+	K2_OnMatchLeft.Broadcast(Reason);
+}
+
+void UModularMatchSubsystem::HandleLobbyJoined(const UE::Online::FLobbyJoined& EventParameters, const EModularOnlineRole /*Role*/)
+{
+	if (IsOurLobby(*EventParameters.Lobby))
+	{
+		bDepartureAnnounced = false;
+
+		UE_LOG(LogModularOnline, Log, TEXT("Joined match %s."), *ToLogString(EventParameters.Lobby->LobbyId));
+	}
+}
+
+void UModularMatchSubsystem::HandleLobbyLeft(const UE::Online::FLobbyLeft& EventParameters, const EModularOnlineRole /*Role*/)
+{
+	if (IsOurLobby(*EventParameters.Lobby))
+	{
+		UE_LOG(LogModularOnline, Log, TEXT("Left match %s."), *ToLogString(EventParameters.Lobby->LobbyId));
+
+		// Says nothing about why, so it only answers when nothing else already did: a member event carries
+		// the reason and arrives first.
+		AnnounceDeparture(EModularMatchLeaveReason::Left);
+	}
+}
+
+void UModularMatchSubsystem::HandleLobbyMemberJoined(const UE::Online::FLobbyMemberJoined& EventParameters, const EModularOnlineRole Role)
+{
+	if (IsOurLobby(*EventParameters.Lobby) && !IsLocalAccount(Role, EventParameters.Member->AccountId))
+	{
+		// Somebody arriving is not somebody leaving, and the reason a member event carries only means
+		// anything when they went.
+		const auto Member = MakeModularAccount(EventParameters.Member->AccountId);
+
+		OnMemberJoined.Broadcast(Member, EModularMatchLeaveReason::None);
+		K2_OnMemberJoined.Broadcast(Member, EModularMatchLeaveReason::None);
+	}
+}
+
+void UModularMatchSubsystem::HandleLobbyMemberLeft(const UE::Online::FLobbyMemberLeft& EventParameters, const EModularOnlineRole Role)
+{
+	if (!IsOurLobby(*EventParameters.Lobby))
+	{
+		return;
+	}
+
+	const auto Reason = PoFigGames::Online::Private::FromLobbyLeaveReason(EventParameters.Reason);
+
+	// The member who left being us is the one place that knows why the match ended, which the plain left
+	// event cannot tell apart.
+	if (IsLocalAccount(Role, EventParameters.Member->AccountId))
+	{
+		AnnounceDeparture(Reason);
+
+		return;
+	}
+
+	// Once we are out, the services report everybody still in the lobby as having left it. Passing that
+	// on would tell the game the match emptied when it was the game that walked away.
+	if (!bDepartureAnnounced)
+	{
+		const auto MemberId = MakeModularAccount(EventParameters.Member->AccountId);
+
+		OnMemberLeft.Broadcast(MemberId, Reason);
+		K2_OnMemberLeft.Broadcast(MemberId, Reason);
 	}
 }
 
@@ -1181,49 +1358,88 @@ void UModularMatchSubsystem::HandleLobbyJoinRequested(const UE::Online::FUILobby
 	AnnounceJoinRequestedFromOverlay(Match, Role, EventParameters.LocalAccountId);
 }
 
-void UModularMatchSubsystem::HandleNetworkFailure(UWorld* /*World*/, UNetDriver* NetDriver, const ENetworkFailure::Type FailureType, const FString& ErrorString)
+bool UModularMatchSubsystem::OwnsFailedConnection(const UWorld* World, const UNetDriver* NetDriver) const
+{
+	if (World)
+	{
+		return World->GetGameInstance() == GetGameInstance();
+	}
+
+	// A connection that failed before a world existed is reported with none, and its owner is found
+	// through the pending game of each context - which is how the engine finds it too
+	// (UnrealEngine.cpp:15318-15331, checked on 2026-09-15).
+	if (GEngine)
+	{
+		for (const auto& Context : GEngine->GetWorldContexts())
+		{
+			if (Context.PendingNetGame && Context.PendingNetGame->NetDriver == NetDriver)
+			{
+				return Context.OwningGameInstance == GetGameInstance();
+			}
+		}
+	}
+
+	return false;
+}
+
+void UModularMatchSubsystem::HandleNetworkFailure(UWorld* World, UNetDriver* NetDriver, const ENetworkFailure::Type FailureType, const FString& ErrorString)
 {
 	// Only the driver carrying the game is a match. A beacon has its own failures, and a host losing one
 	// client is that client's problem rather than the host's.
 	if (NetDriver == nullptr
 		|| (NetDriver->NetDriverName != NAME_GameNetDriver && NetDriver->NetDriverName != NAME_PendingNetDriver)
-		|| NetDriver->GetNetMode() != NM_Client)
+		|| NetDriver->GetNetMode() != NM_Client
+		|| !OwnsFailedConnection(World, NetDriver))
 	{
 		return;
 	}
 
-	// A failure the server sent is a decision it made about this player; anything else is the connection
-	// itself giving out.
+	// FailureReceived is the server sending NMT_Failure - a refused login, a wrong password, a full server
+	// - and not a kick: the engine kicks by destroying the controller, which reads here as a lost one.
 	const auto Reason = FailureType == ENetworkFailure::FailureReceived
-		? EModularMatchLeaveReason::Kicked
+		? EModularMatchLeaveReason::Refused
 		: EModularMatchLeaveReason::Disconnected;
 
 	UE_LOG(LogModularOnline, Log, TEXT("The connection to the match failed (%s): %s"), ENetworkFailure::ToString(FailureType), *ErrorString);
 
-	OnMatchLeft.Broadcast(Reason);
-	K2_OnMatchLeft.Broadcast(Reason);
+	AnnounceDeparture(Reason);
 }
 
-void UModularMatchSubsystem::HandleTravelFailure(UWorld* /*World*/, const ETravelFailure::Type FailureType, const FString& ErrorString)
+void UModularMatchSubsystem::HandleTravelFailure(UWorld* World, const ETravelFailure::Type FailureType, const FString& ErrorString)
 {
-	// A dedicated server has no match of its own to be thrown out of, and nobody to tell.
-	if (bIsDedicatedServer)
+	// A server failing its own travel did not lose a match, it failed to open one, and it has nobody to
+	// tell either way.
+	if (bIsDedicatedServer || FailureType == ETravelFailure::ServerTravelFailure)
+	{
+		return;
+	}
+
+	if (!World || World->GetGameInstance() != GetGameInstance() || World->GetNetMode() == NM_ListenServer)
+	{
+		return;
+	}
+
+	// Travel fails for a mistyped address as readily as for a match, and only one of those is something
+	// the player was in.
+	auto Role = EModularOnlineRole::Default;
+	FModularMatchContext Context;
+	FModularMatchHandle Match;
+
+	if (!FindActiveMatch(0, Role, Context, Match))
 	{
 		return;
 	}
 
 	UE_LOG(LogModularOnline, Log, TEXT("Travelling to the match failed (%s): %s"), ETravelFailure::ToString(FailureType), *ErrorString);
 
-	OnMatchLeft.Broadcast(EModularMatchLeaveReason::Disconnected);
-	K2_OnMatchLeft.Broadcast(EModularMatchLeaveReason::Disconnected);
+	AnnounceDeparture(EModularMatchLeaveReason::Disconnected);
 }
 
 void UModularMatchSubsystem::HandleSessionLeft(const UE::Online::FSessionLeft& EventParameters)
 {
 	UE_LOG(LogModularOnline, Log, TEXT("Left a session."));
 
-	OnMatchLeft.Broadcast(EModularMatchLeaveReason::Left);
-	K2_OnMatchLeft.Broadcast(EModularMatchLeaveReason::Left);
+	AnnounceDeparture(EModularMatchLeaveReason::Left);
 }
 
 void UModularMatchSubsystem::HandleSessionInvite(const UE::Online::FSessionInviteReceived& EventParameters, const EModularOnlineRole Role)
@@ -1292,6 +1508,45 @@ void UModularMatchSubsystem::HandleSessionJoinRequested(const UE::Online::FUISes
 
 	auto Match = FModularSessionBackend::DescribeSession(*Session.GetOkValue().Session);
 	AnnounceJoinRequestedFromOverlay(Match, Role, EventParameters.LocalAccountId);
+}
+
+FModularOnlineResult UModularMatchSubsystem::RefuseWhileTravelling() const
+{
+	if (PendingTravelURL.IsEmpty())
+	{
+		return FModularOnlineResult::Success();
+	}
+
+	// One address is kept at a time, and a second request would take the first one's place: the first
+	// caller would then be answered with a success for a travel to somebody else's map.
+	UE_LOG(LogModularOnline, Warning, TEXT("A match is already waiting to travel to '%s'; the new request was refused."), *PendingTravelURL);
+
+	auto Refusal = FModularOnlineResult::FromOnlineError(UE::Online::Errors::AlreadyPending());
+	Refusal.ErrorText = NSLOCTEXT("ModularOnline", "MatchAlreadyTravelling", "The match is already opening somewhere else.");
+
+	return Refusal;
+}
+
+FModularOnlineResult UModularMatchSubsystem::BuildContextOrRefusal(const int32 LocalPlayerIndex, const EModularOnlineRole Role,
+	const TSharedPtr<PoFigGames::Online::IModularMatchBackend>& InBackend, FModularMatchContext& OutContext) const
+{
+	if (!InBackend.IsValid())
+	{
+		return GetMissingBackendResult();
+	}
+
+	if (!BuildContext(LocalPlayerIndex, Role, OutContext))
+	{
+		auto Refusal = FModularOnlineResult::FromOnlineError(UE::Online::Errors::NotLoggedIn());
+
+		Refusal.ErrorText = bIsDedicatedServer
+			? NSLOCTEXT("ModularOnline", "ServerNotSignedIn", "This server is not signed in to the online service.")
+			: NSLOCTEXT("ModularOnline", "PlayerNotSignedIn", "You are not signed in to the online service.");
+
+		return Refusal;
+	}
+
+	return FModularOnlineResult::Success();
 }
 
 FModularOnlineResult UModularMatchSubsystem::GetMissingBackendResult() const

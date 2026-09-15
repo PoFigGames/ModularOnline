@@ -35,8 +35,9 @@ First public shape of the plugin. Everything below is implemented and builds; se
   refuses a player ends the connection and not the lobby, so the online layer would otherwise hear
   nothing and the game would be left standing in a world nobody was talking to any more.
   `UModularMatchSubsystem` listens to the engine's `OnNetworkFailure` and `OnTravelFailure` and answers
-  with `OnMatchLeft`: a failure the server sent is `Kicked`, because it is a decision it made about this
-  player, and everything else is `Disconnected`. Only the game net driver of a client is listened to, so
+  with `OnMatchLeft`: a failure the server sent is `Refused`, because it is a decision it made about this
+  player, and everything else is `Disconnected`. `Kicked` belongs to the lobby's own kick and to nothing
+  else. Only the game net driver of a client is listened to, so
   a beacon's troubles and a host losing one client are not mistaken for the local player being thrown
   out.
 - **Presence says whether a friend can join it.** Each configured state carries its own joinability, so
@@ -47,10 +48,12 @@ First public shape of the plugin. Everything below is implemented and builds; se
 - **Configuration.** Six sections named for their subject — `Providers`, `Matches`, `CrossPlay`,
   `Accounts`, `Presence`, `DedicatedServer` — rather than for the class that reads them. Attributes a
   provider publishes about a match itself are recognised by a configured prefix and left alone when the
-  game updates its own.
+  game updates its own. No schema id, attribute name or account key ships as a default: a project names
+  them or the match layer refuses to publish, rather than guessing at somebody else's schema.
 - **Console commands.** `ModularOnline.Status`, `.Refresh`, `.HasFeature`.
-- **Automation tests.** Twelve, over the parts that are pure rules: error mapping, role resolution,
-  cross play policy, presence states, match handles, settings.
+- **Automation tests.** Sixteen, over the parts that are pure rules: error mapping, role resolution,
+  cross play policy, presence states, match handles, settings, published text, reserved attributes, the
+  merge of two searches, and which steps a login walks when nobody signs anybody in.
 
 ### Not yet verified
 
@@ -67,7 +70,8 @@ confirmed.** In particular:
 
 ### Known gaps
 
-- No debug overlay, and no tests of the login or match flow as a whole.
+- No debug overlay. The rules a login and a search walk by are tested; the flows themselves, end to end
+  against a provider, are not — that needs a services double this plugin does not carry.
 - Proving who a joining player is has no place here. It belongs to the connection, before there is a
   login to refuse, and so to whatever carries that connection — on Steam a packet handler, on Epic an ID
   token the client copies and the server verifies. Online Services v2 declares operations for it, but

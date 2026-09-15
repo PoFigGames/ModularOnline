@@ -4,14 +4,20 @@
 #include "Misc/AutomationTest.h"
 
 #include "Match/ModularLobbyBackend.h"
+#include "Match/ModularMatchBackend.h"
 #include "Match/ModularMatchSubsystem.h"
 #include "Match/ModularMatchTypes.h"
 #include "Match/ModularSessionBackend.h"
+#include "Engine/GameInstance.h"
+#include "Features/ModularPresenceSubsystem.h"
+#include "Tests/ModularOnlineTestProbes.h"
 #include "Core/ModularOnlineContext.h"
 #include "Core/ModularOnlineSettings.h"
 #include "Core/ModularOnlineTags.h"
 #include "Core/ModularOnlineTypes.h"
 #include "User/ModularUserInfo.h"
+#include "User/ModularUserSubsystem.h"
+#include "User/ModularUserTags.h"
 #include "User/ModularUserTypes.h"
 #include "Online/Auth.h"
 #include "Online/OnlineErrorDefinitions.h"
@@ -51,14 +57,24 @@ bool FModularOnlineResultTest::RunTest(const FString& /*Parameters*/)
 	}
 
 	// The categories a screen branches on, and the errors that have to land in them.
-	TestEqual(TEXT("NotImplemented is NotSupported"), FModularOnlineResult::FromOnlineError(Errors::NotImplemented()).Category, EModularOnlineErrorCategory::NotSupported);
-	TestEqual(TEXT("MissingInterface is NotSupported"), FModularOnlineResult::FromOnlineError(Errors::MissingInterface()).Category, EModularOnlineErrorCategory::NotSupported);
-	TestEqual(TEXT("NotLoggedIn is NotLoggedIn"), FModularOnlineResult::FromOnlineError(Errors::NotLoggedIn()).Category, EModularOnlineErrorCategory::NotLoggedIn);
-	TestEqual(TEXT("NoConnection is NoConnection"), FModularOnlineResult::FromOnlineError(Errors::NoConnection()).Category, EModularOnlineErrorCategory::NoConnection);
-	TestEqual(TEXT("AccessDenied is AccessDenied"), FModularOnlineResult::FromOnlineError(Errors::AccessDenied()).Category, EModularOnlineErrorCategory::AccessDenied);
-	TestEqual(TEXT("Cancelled is Cancelled"), FModularOnlineResult::FromOnlineError(Errors::Cancelled()).Category, EModularOnlineErrorCategory::Cancelled);
-	TestEqual(TEXT("Timeout is TimedOut"), FModularOnlineResult::FromOnlineError(Errors::Timeout()).Category, EModularOnlineErrorCategory::TimedOut);
-	TestEqual(TEXT("An unmapped error stays Unknown"), FModularOnlineResult::FromOnlineError(Errors::RequestFailure()).Category, EModularOnlineErrorCategory::Unknown);
+	const TArray<TPair<UE::Online::FOnlineError, EModularOnlineErrorCategory>> Mappings
+	{
+		{ Errors::NotImplemented(), EModularOnlineErrorCategory::NotSupported },
+		{ Errors::MissingInterface(), EModularOnlineErrorCategory::NotSupported },
+		{ Errors::NotLoggedIn(), EModularOnlineErrorCategory::NotLoggedIn },
+		{ Errors::NoConnection(), EModularOnlineErrorCategory::NoConnection },
+		{ Errors::AccessDenied(), EModularOnlineErrorCategory::AccessDenied },
+		{ Errors::Cancelled(), EModularOnlineErrorCategory::Cancelled },
+		{ Errors::Timeout(), EModularOnlineErrorCategory::TimedOut },
+		{ Errors::RequestFailure(), EModularOnlineErrorCategory::Unknown },
+	};
+
+	for (const auto& Mapping : Mappings)
+	{
+		const auto Translated = FModularOnlineResult::FromOnlineError(Mapping.Key);
+
+		TestEqual(*FString::Printf(TEXT("%s lands in the right category"), *Mapping.Key.GetErrorId()), Translated.Category, Mapping.Value);
+	}
 
 	{
 		const auto Result = FModularOnlineResult::FromOnlineError(Errors::NoConnection());
@@ -74,33 +90,36 @@ bool FModularOnlineContextTest::RunTest(const FString& /*Parameters*/)
 {
 	using namespace PoFigGames::Online;
 
-	// A machine without the provider's SDK logs this at error level, which the automation framework counts
-	// as a failure. A negative count means "ignore if present"; zero would make them required.
+	// What the type itself guarantees, asserted on every machine: an offline build and a commandlet both
+	// reach this state, and it has to be survivable rather than merely untested here.
+	const FModularOnlineContext Nothing { EModularOnlineRole::Default, nullptr };
+
+	TestFalse(TEXT("A context without services is not valid"), Nothing.IsValid());
+	TestEqual(TEXT("A context without services implements nothing"), Nothing.GetFeatures().Num(), 0);
+	TestEqual(TEXT("A context without services has no provider"), Nothing.GetProvider(), UE::Online::EOnlineServices::None);
+	TestFalse(TEXT("And it implements no component by name either"), Nothing.HasFeature(ModularOnlineTags::Feature_Auth));
+
+	// The rest depends on what this machine has configured, so it reports rather than asserts. Asking for
+	// the services initialises the SDK, and failing to do so logs an error the framework counts as a test
+	// failure; a negative count means "ignore if present".
 	AddExpectedMessagePlain(TEXT("InitEx failed"), ELogVerbosity::Error, EAutomationExpectedMessageFlags::Contains, -1);
 	AddExpectedMessagePlain(TEXT("Failed to initialize a "), ELogVerbosity::Error, EAutomationExpectedMessageFlags::Contains, -1);
 
 	// Taken without a world on purpose: this runs outside a game instance, and the shared instance is the
-	// only one there is here. What is under test is the discovery, not which world it was asked for.
+	// only one there is here.
 	const auto Services = UE::Online::GetServices(UE::Online::EOnlineServices::Default);
-
-	const FModularOnlineContext Context { EModularOnlineRole::Default, Services };
 
 	if (!Services.IsValid())
 	{
-		// A build with no online services is a state this plugin has to survive, not a failed test.
-		TestFalse(TEXT("A context without services is not valid"), Context.IsValid());
-		TestEqual(TEXT("A context without services implements nothing"), Context.GetFeatures().Num(), 0);
-		TestEqual(TEXT("A context without services has no provider"), Context.GetProvider(), UE::Online::EOnlineServices::None);
+		AddInfo(TEXT("No online services are configured on this machine; discovery was not exercised."));
 
 		return true;
 	}
 
+	const FModularOnlineContext Context { EModularOnlineRole::Default, Services };
+
 	TestTrue(TEXT("A context over real services is valid"), Context.IsValid());
 	TestNotEqual(TEXT("A context over real services names its provider"), Context.GetProvider(), UE::Online::EOnlineServices::None);
-
-	// Every provider worth configuring signs users in; if even that is missing, discovery is broken
-	// rather than the provider being modest.
-	TestTrue(TEXT("A configured provider implements authentication"), Context.HasFeature(ModularOnlineTags::Feature_Auth));
 
 	AddInfo(FString::Printf(TEXT("Provider '%s' implements %d components: %s"),
 		*Context.GetProviderName(),
@@ -177,8 +196,8 @@ bool FModularOnlineSettingsTest::RunTest(const FString& /*Parameters*/)
 
 	// A provider that named its own key gets it; everyone else gets the default. This is what lets a new
 	// platform be supported by an ini entry rather than by a rebuild.
-	TestEqual(TEXT("A named provider gets its own attribute"), Accounts->GetAvatarAttribute(TEXT("Steam")), FString(TEXT("avatar_url_full")));
-	TestEqual(TEXT("An unnamed provider falls back to the default"), Accounts->GetAvatarAttribute(TEXT("Epic")), FString(TEXT("AvatarUrl")));
+	TestEqual(TEXT("A named provider gets its own attribute"), Accounts->GetAvatarAttribute(TEXT("Steam")), FName(TEXT("avatar_url_full")));
+	TestEqual(TEXT("An unnamed provider falls back to the default"), Accounts->GetAvatarAttribute(TEXT("Epic")), FName(TEXT("AvatarUrl")));
 
 	// The store is addressed separately from matches on purpose: the backend that runs a project's
 	// sessions is rarely the storefront that took the player's money. A project where they are the same
@@ -187,9 +206,9 @@ bool FModularOnlineSettingsTest::RunTest(const FString& /*Parameters*/)
 	TestEqual(TEXT("The store defaults to the platform role"), Roles->StoreRole, EModularOnlineRole::Platform);
 
 	// Emptying the default is how a project says that avatars are not read at all.
-	Accounts->DefaultAvatarAttribute.Reset();
-	TestTrue(TEXT("An empty default means no avatar is read"), Accounts->GetAvatarAttribute(TEXT("Epic")).IsEmpty());
-	TestEqual(TEXT("An empty default does not affect a named provider"), Accounts->GetAvatarAttribute(TEXT("Steam")), FString(TEXT("avatar_url_full")));
+	Accounts->DefaultAvatarAttribute = FName { };
+	TestTrue(TEXT("An unset default means no avatar is read"), Accounts->GetAvatarAttribute(TEXT("Epic")).IsNone());
+	TestEqual(TEXT("An unset default does not affect a named provider"), Accounts->GetAvatarAttribute(TEXT("Steam")), FName(TEXT("avatar_url_full")));
 
 	return true;
 }
@@ -221,7 +240,18 @@ bool FModularOnlineMatchSettingsTest::RunTest(const FString& /*Parameters*/)
 	TestTrue(TEXT("An argument with a value is written as one"), WithArguments.Contains(TEXT("?Difficulty=Hard")));
 	TestTrue(TEXT("An argument without a value is written bare"), WithArguments.Contains(TEXT("?Tutorial")));
 
-	// The mode a match is advertised under falls back to the name of the project rather than to nothing.
+	// A URL of options with no map in front of it is a relative one, and the engine would fill the map in
+	// from wherever the game already is.
+	FModularMatchSettings Unknown;
+	Unknown.OnlineMode = EModularMatchOnlineMode::Online;
+
+	TestTrue(TEXT("A match with no map has nowhere to travel"), Unknown.ConstructTravelURL().IsEmpty());
+
+	Unknown.OnlineMode = EModularMatchOnlineMode::LAN;
+	Unknown.ExtraArgs.Add(TEXT("Difficulty"), TEXT("Hard"));
+
+	TestTrue(TEXT("Neither do its options give it one"), Unknown.ConstructTravelURL().IsEmpty());
+
 
 #if WITH_SERVER_CODE
 	FText Error;
@@ -302,11 +332,31 @@ bool FModularOnlineBackendRefusalTest::RunTest(const FString& /*Parameters*/)
 		FoundCount = Matches.Num();
 	});
 
-	FModularLobbyBackend { }.FindMatches(Nothing, FModularMatchSearchParams { }, OnSearch);
+	FModularLobbyBackend Searching;
+	Searching.FindMatches(Nothing, FModularMatchSearchParams { }, OnSearch);
 
 	TestTrue(TEXT("A search without services answers"), bSearchAnswered);
 	TestFalse(TEXT("With a refusal"), SearchAnswer.bWasSuccessful);
 	TestEqual(TEXT("And an empty list, not an absent one"), FoundCount, 0);
+
+	// A lobby is a service record, so there is no local-network one to open. Answering anything but a
+	// refusal would publish an internet match to somebody who asked for a LAN game.
+	auto LanSettings = Settings;
+	LanSettings.OnlineMode = EModularMatchOnlineMode::LAN;
+
+	auto bLanAnswered = false;
+	FModularOnlineResult LanAnswer;
+
+	FModularLobbyBackend Hosting;
+	Hosting.CreateMatch(Nothing, LanSettings, FModularMatchOperationDelegate::CreateLambda([&bLanAnswered, &LanAnswer](const FModularOnlineResult& Result)
+	{
+		bLanAnswered = true;
+		LanAnswer = Result;
+	}));
+
+	TestTrue(TEXT("A LAN match on lobbies is answered"), bLanAnswered);
+	TestFalse(TEXT("And refused"), LanAnswer.bWasSuccessful);
+	TestEqual(TEXT("Because lobbies carry no LAN match"), LanAnswer.Category, EModularOnlineErrorCategory::NotSupported);
 
 	return true;
 }
@@ -348,6 +398,45 @@ bool FModularCrossPlayPolicyTest::RunTest(const FString& /*Parameters*/)
 }
 
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FModularPublishedTextTest, "ModularOnline.Match.PublishedText", PoFigGames::Online::Tests::TestFlags)
+
+bool FModularPublishedTextTest::RunTest(const FString& /*Parameters*/)
+{
+	using PoFigGames::Online::IModularMatchBackend;
+
+	TestEqual(TEXT("An ordinary name is shown as it was published"),
+		IModularMatchBackend::DescribePublishedText(TEXT("Anna's run")), FString(TEXT("Anna's run")));
+
+	FString WithControls { TEXT("Room") };
+	WithControls.AppendChar(TEXT('\n'));
+	WithControls.AppendChar(TEXT('\t'));
+	WithControls.Append(TEXT("One"));
+
+	TestEqual(TEXT("Control characters do not reach a widget"),
+		IModularMatchBackend::DescribePublishedText(WithControls), FString(TEXT("RoomOne")));
+
+	const FString TooLong { FString::ChrN(600, TEXT('A')) };
+	TestEqual(TEXT("A name is bounded before it reaches a list"), IModularMatchBackend::DescribePublishedText(TooLong).Len(), 256);
+
+	// What the provider keeps beside a match is recognised by the configured prefix and never removed by
+	// an update; with no prefix configured nothing is reserved and everything the match no longer names
+	// comes off.
+	const auto Backends = GetMutableDefault<UModularMatchBackendSettings>();
+	const auto Configured = Backends->ReservedAttributePrefix;
+
+	Backends->ReservedAttributePrefix = TEXT("__");
+	TestTrue(TEXT("A prefixed attribute belongs to the provider"), IModularMatchBackend::IsProviderAttribute(TEXT("__memberCount")));
+	TestFalse(TEXT("An ordinary attribute does not"), IModularMatchBackend::IsProviderAttribute(TEXT("Map")));
+
+	Backends->ReservedAttributePrefix.Reset();
+	TestFalse(TEXT("With no prefix configured nothing is reserved"), IModularMatchBackend::IsProviderAttribute(TEXT("__memberCount")));
+
+	Backends->ReservedAttributePrefix = Configured;
+
+	return true;
+}
+
+
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FModularCrossPlaySettingsTest, "ModularOnline.Match.CrossPlaySettings", PoFigGames::Online::Tests::TestFlags)
 
 bool FModularCrossPlaySettingsTest::RunTest(const FString& /*Parameters*/)
@@ -365,9 +454,55 @@ bool FModularCrossPlaySettingsTest::RunTest(const FString& /*Parameters*/)
 	TestEqual(TEXT("The companion publication is a lobby"), Settings->CompanionMatchBackend, EModularMatchBackendKind::Lobbies);
 	TestNotEqual(TEXT("The companion role is not the match role"), Roles->CompanionMatchRole, Roles->MatchRole);
 
-	// Both names have to reach the schema the project declared, so neither may be empty.
-	TestFalse(TEXT("Cross play is published under a name"), Settings->MatchCrossPlayAttribute.IsNone());
-	TestFalse(TEXT("The two publications are linked by a name"), Settings->MatchLinkAttribute.IsNone());
+	// Both names have to reach the schema the project declared, and the plugin knows no schema: a name it
+	// brought along would publish an attribute the project never declared and have the whole match refused.
+	TestTrue(TEXT("Cross play carries no name of the plugin's own"), Settings->MatchCrossPlayAttribute.IsNone());
+	TestTrue(TEXT("The link between publications carries no name of the plugin's own"), Settings->MatchLinkAttribute.IsNone());
+
+	return true;
+}
+
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FModularLoginFlowTest, "ModularOnline.User.LoginFlow", PoFigGames::Online::Tests::TestFlags)
+
+bool FModularLoginFlowTest::RunTest(const FString& /*Parameters*/)
+{
+	const auto Instance = NewObject<UGameInstance>(GetTransientPackage());
+	const auto Probe = NewObject<UModularLoginFlowProbe>(Instance);
+
+	// No provider behind it: an offline build and a commandlet both reach this, and the login has to walk
+	// none of its steps rather than fail at the first one.
+	const FModularLoginParams Params;
+
+	for (const auto Step : { EModularLoginStep::PlatformLogin, EModularLoginStep::TransferAuth, EModularLoginStep::ServiceLogin, EModularLoginStep::PrivilegeCheck })
+	{
+		TestEqual(*FString::Printf(TEXT("Step %d is skipped when nobody signs anybody in"), static_cast<int32>(Step)),
+			Probe->PolicyOf(Step, Params), EModularStepPolicy::Skip);
+	}
+
+	// A guest seat is for a player who has no account, and only where the platform says guests exist.
+	FGameplayTagContainer Traits;
+	Traits.AddTag(ModularUserTags::Trait_AllowsGuests.GetTag());
+	Probe->SetTraitTags(Traits);
+
+	TestTrue(TEXT("A second player with no account may sit as a guest"),
+		Probe->WouldBecomeGuest(1, true, EModularOnlineErrorCategory::NotLoggedIn, EModularLoginStep::PlatformLogin));
+
+	// The refusals that are about the account itself, which a guest seat would walk around.
+	TestFalse(TEXT("A refused account does not become a guest"),
+		Probe->WouldBecomeGuest(1, true, EModularOnlineErrorCategory::AccessDenied, EModularLoginStep::PlatformLogin));
+	TestFalse(TEXT("Neither does a failure past the platform step"),
+		Probe->WouldBecomeGuest(1, true, EModularOnlineErrorCategory::NotLoggedIn, EModularLoginStep::ServiceLogin));
+	TestFalse(TEXT("Nor the primary player, who is the account a guest sits beside"),
+		Probe->WouldBecomeGuest(0, true, EModularOnlineErrorCategory::NotLoggedIn, EModularLoginStep::PlatformLogin));
+	TestFalse(TEXT("Nor a caller who did not ask for one"),
+		Probe->WouldBecomeGuest(1, false, EModularOnlineErrorCategory::NotLoggedIn, EModularLoginStep::PlatformLogin));
+
+	// And not at all where the platform has no such thing.
+	Probe->SetTraitTags(FGameplayTagContainer { });
+
+	TestFalse(TEXT("A platform without guests has none"),
+		Probe->WouldBecomeGuest(1, true, EModularOnlineErrorCategory::NotLoggedIn, EModularLoginStep::PlatformLogin));
 
 	return true;
 }
@@ -427,6 +562,73 @@ bool FModularUserSignedInOnlineTest::RunTest(const FString& /*Parameters*/)
 }
 
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FModularMergeMatchesTest, "ModularOnline.Match.MergeMatches", PoFigGames::Online::Tests::TestFlags)
+
+bool FModularMergeMatchesTest::RunTest(const FString& /*Parameters*/)
+{
+	// A game instance subsystem is declared within a game instance, so one has to exist to hold it even
+	// when nothing about it is initialised.
+	const auto Instance = NewObject<UGameInstance>(GetTransientPackage());
+	const auto Probe = NewObject<UModularMergeMatchesProbe>(Instance);
+	const auto CrossPlay = GetMutableDefault<UModularCrossPlaySettings>();
+	const auto Configured = CrossPlay->MatchLinkAttribute;
+
+	CrossPlay->MatchLinkAttribute = TEXT("LinkedMatchId");
+
+	FModularMatchInfo OnTheMatchRole;
+	OnTheMatchRole.Handle.Id = TEXT("match-1");
+
+	FModularMatchInfo TheSameGameOnThePlatform;
+	TheSameGameOnThePlatform.Handle.Id = TEXT("platform-1");
+	TheSameGameOnThePlatform.Attributes.Emplace(TEXT("LinkedMatchId"), TEXT("match-1"));
+
+	FModularMatchInfo SomebodyElse;
+	SomebodyElse.Handle.Id = TEXT("platform-2");
+
+	TArray<FModularMatchInfo> Found { OnTheMatchRole };
+	Probe->Merge(Found, { TheSameGameOnThePlatform, SomebodyElse }, 20);
+
+	// One game published twice is one line in a browser; the link attribute is the only thing that says so.
+	TestEqual(TEXT("The second publication of the same game is not listed again"), Found.Num(), 2);
+	TestEqual(TEXT("And the one that is added is the other host's"), Found[1].Handle.Id, FString(TEXT("platform-2")));
+
+	// Without the link nothing connects the two answers, and both are listed.
+	CrossPlay->MatchLinkAttribute = FName { };
+
+	TArray<FModularMatchInfo> Unlinked { OnTheMatchRole };
+	Probe->Merge(Unlinked, { TheSameGameOnThePlatform }, 20);
+
+	TestEqual(TEXT("With no link configured a game published twice is listed twice"), Unlinked.Num(), 2);
+
+	// What a search was asked for is what it answers with, however many roles it looked on.
+	TArray<FModularMatchInfo> Capped { OnTheMatchRole };
+	Probe->Merge(Capped, { TheSameGameOnThePlatform, SomebodyElse }, 1);
+
+	TestEqual(TEXT("A merge does not exceed the number of results asked for"), Capped.Num(), 1);
+
+	CrossPlay->MatchLinkAttribute = Configured;
+
+	return true;
+}
+
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FModularPresenceWithoutServicesTest, "ModularOnline.Features.PresenceWithoutServices", PoFigGames::Online::Tests::TestFlags)
+
+bool FModularPresenceWithoutServicesTest::RunTest(const FString& /*Parameters*/)
+{
+	// A subsystem with no game instance behind it has no services either, which is the state a commandlet
+	// and an offline build are in. Publishing has to answer false rather than reach through a null.
+	const auto Instance = NewObject<UGameInstance>(GetTransientPackage());
+	const auto Presence = NewObject<UModularPresenceSubsystem>(Instance);
+	const auto State = FGameplayTag::RequestGameplayTag(TEXT("Online.Feature.Presence"));
+
+	TestFalse(TEXT("A described state cannot be published without services"), Presence->PublishState(0, State, TMap<FString, FString> { }));
+	TestFalse(TEXT("Neither can an undescribed one"), Presence->PublishState(0, FGameplayTag { }, TMap<FString, FString> { }));
+
+	return true;
+}
+
+
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FModularPresenceStatesTest, "ModularOnline.Features.PresenceStates", PoFigGames::Online::Tests::TestFlags)
 
 bool FModularPresenceStatesTest::RunTest(const FString& /*Parameters*/)
@@ -445,7 +647,7 @@ bool FModularPresenceStatesTest::RunTest(const FString& /*Parameters*/)
 	InMatch.State = FGameplayTag::RequestGameplayTag(TEXT("Online.Feature.Presence"));
 	InMatch.Status = TEXT("Status_InGame");
 	InMatch.Properties.Emplace(TEXT("map_name"), TEXT("{map}"));
-	InMatch.Properties.Emplace(TEXT("game_mode"), TEXT("{mode}"));
+	InMatch.Properties.Emplace(TEXT("zone"), TEXT("{zone}"));
 	InMatch.Properties.Emplace(TEXT("kind"), TEXT("coop"));
 
 	Settings->States.Add(InMatch);

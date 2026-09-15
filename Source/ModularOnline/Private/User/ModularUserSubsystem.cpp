@@ -291,9 +291,9 @@ void UModularUserSubsystem::RefreshRoleData(UModularUserInfo* User, const EModul
 	const auto Context = Online->GetContext(Role);
 	const auto Settings = GetDefault<UModularAccountSettings>();
 
-	if (const auto AvatarAttribute = Settings && Context ? Settings->GetAvatarAttribute(Context->GetProviderName()) : FString { }; !AvatarAttribute.IsEmpty())
+	if (const auto AvatarAttribute = Settings && Context ? Settings->GetAvatarAttribute(Context->GetProviderName()) : FName { }; !AvatarAttribute.IsNone())
 	{
-		if (const auto AvatarUrl = AccountInfo->Attributes.Find(FName(*AvatarAttribute)))
+		if (const auto AvatarUrl = AccountInfo->Attributes.Find(AvatarAttribute))
 		{
 			Data.AvatarUrl = AvatarUrl->GetString();
 		}
@@ -309,7 +309,8 @@ void UModularUserSubsystem::BindServiceEvents()
 	}
 
 	// A handle taken from the previous services listens to services that are gone. The instance name is
-	// how a new world is recognised, and outside the editor it is always empty.
+	// how a new world is recognised, and outside the editor GetServicesInstanceName answers nothing at all
+	// (checked against 5.8.3 on 2026-09-15).
 	if (const auto Instance = Online->GetBoundInstanceName(); Instance != BoundToInstance || !bInstanceKnown)
 	{
 		BoundToInstance = Instance;
@@ -319,8 +320,8 @@ void UModularUserSubsystem::BindServiceEvents()
 		ExternalUIHandles.Reset();
 	}
 
-	// Bound here rather than in Initialize, because the contexts are built for the world this game
-	// instance runs and there is no world yet when subsystems are initialised.
+	// Bound here rather than in Initialize: the contexts are built for a world, and there is none yet when
+	// subsystems are. Only a role with a provider of its own, or the same event arrives twice.
 	for (const auto Role : { EModularOnlineRole::Default, EModularOnlineRole::Platform, EModularOnlineRole::Service })
 	{
 		if (const auto bWorthBinding = !LoginStatusHandles.Contains(Role) && Online->HasDedicatedProvider(Role); bWorthBinding)
@@ -337,20 +338,6 @@ void UModularUserSubsystem::BindServiceEvents()
 			{
 				ExternalUIHandles.Add(Role, ExternalUI->OnExternalUIStatusChanged().Add(this, &ThisClass::HandleExternalUIStatusChanged));
 			}
-		}
-	}
-
-	// The default role always exists when any provider does, and it is not listed as dedicated.
-	if (!LoginStatusHandles.Contains(EModularOnlineRole::Default) && Online->HasAnyProvider())
-	{
-		if (const auto Auth = Online->GetInterface<UE::Online::IAuth>(EModularOnlineRole::Default))
-		{
-			LoginStatusHandles.Add(EModularOnlineRole::Default, Auth->OnLoginStatusChanged().Add(this, &ThisClass::HandleLoginStatusChanged, EModularOnlineRole::Default));
-		}
-
-		if (const auto ExternalUI = Online->GetInterface<UE::Online::IExternalUI>(EModularOnlineRole::Default); ExternalUI && !ExternalUIHandles.Contains(EModularOnlineRole::Default))
-		{
-			ExternalUIHandles.Add(EModularOnlineRole::Default, ExternalUI->OnExternalUIStatusChanged().Add(this, &ThisClass::HandleExternalUIStatusChanged));
 		}
 	}
 }
@@ -370,10 +357,10 @@ void UModularUserSubsystem::HandleLoginStatusChanged(const UE::Online::FAuthLogi
 		return;
 	}
 
-	// A record with nothing on this role was not signed in on it. That is what the player who asked to
-	// sign out is left holding - an empty replacement - and their own request is not something to report
-	// back to them as a failure.
-	const auto bWasSignedIn = User->GetAccountId(Role).IsValid();
+	// A record with nothing on this role was not signed in on it - which is what a player who asked to
+	// sign out is left holding, and not something to report back to them as a failure.
+	const auto PreviousAccount = User->GetAccountId(Role);
+	const auto bWasSignedIn = PreviousAccount.IsValid();
 
 	// Somebody signed out behind our back: the account of that role is gone, and so is anything it
 	// allowed. Whether the player can still play depends on which role it was.
@@ -399,9 +386,8 @@ EModularStepPolicy UModularUserSubsystem::GetStepPolicy(const EModularLoginStep 
 {
 	const auto Online = GetOnline();
 
-	// With no provider at all there is nobody to sign in to, and the player plays locally. This is a
-	// state the plugin supports rather than an error: an offline build, or a platform with nothing
-	// configured yet.
+	// With no provider there is nobody to sign in to and the player plays locally: a supported state, not
+	// an error - an offline build, or a platform with nothing configured yet.
 	if (!Online || !Online->HasAnyProvider())
 	{
 		return EModularStepPolicy::Skip;
@@ -443,9 +429,8 @@ bool UModularUserSubsystem::CanBecomeGuest(const TSharedRef<FLoginRequest>& Requ
 {
 	const auto User = Request->User.Get();
 
-	// Only "this player has no account" becomes a guest. A platform that refused the account it does have
-	// - age restricted, licence invalid, account use restricted - has refused this player, and answering
-	// that refusal with a guest seat would walk straight around it.
+	// Only "this player has no account" becomes a guest. A refusal of the account they do have - age
+	// restricted, licence invalid - is a refusal of the player, and a guest seat would walk around it.
 	const auto bHasNoAccount = Request->Failure.IsSet()
 		&& Request->Failure->Category == EModularOnlineErrorCategory::NotLoggedIn
 		&& Request->FailedStep == EModularLoginStep::PlatformLogin;
@@ -513,6 +498,12 @@ bool UModularUserSubsystem::LoginLocalUser(const FModularLoginParams& Params, FM
 	if (!ResolvedParams.PlatformUser.IsValid())
 	{
 		ResolvedParams.PlatformUser = DeviceMapper.GetPrimaryPlatformUser();
+
+		// The primary system user belongs to player 0, so anybody else landing on it comes back with the
+		// same account id. Where no trait gates that, the caller has to name the device or system user.
+		UE_CLOG(ResolvedParams.LocalPlayerIndex != 0, LogModularOnline, Warning,
+			TEXT("Player %d named neither a controller nor a system user and is signing in as the primary one; both players will carry the same account."),
+			ResolvedParams.LocalPlayerIndex);
 	}
 
 	if (!ResolvedParams.InputDevice.IsValid())
@@ -531,9 +522,8 @@ bool UModularUserSubsystem::LoginLocalUser(const FModularLoginParams& Params, FM
 
 	if (User->PlatformUser.IsValid() && User->PlatformUser != ResolvedParams.PlatformUser)
 	{
-		// A different system user at the same local index. Platforms that allow swapping the account
-		// behind a player say so with a trait; where they do not, a signed in player keeps their account
-		// and the caller has to sign them out first.
+		// A different system user at the same local index. Platforms that allow swapping say so with a
+		// trait; elsewhere a signed in player keeps their account until the caller signs them out.
 		if (User->IsLoggedIn() && !HasTrait(ModularUserTags::Trait_SupportsUserSwitch.GetTag()))
 		{
 			UE_LOG(LogModularOnline, Warning, TEXT("LoginLocalUser refused: player %d is signed in as system user %d and this platform does not switch users."),
@@ -582,13 +572,13 @@ bool UModularUserSubsystem::CancelLogin(const int32 LocalPlayerIndex)
 
 		if (const auto User = Request->User.Get(); User && User->LocalPlayerIndex == LocalPlayerIndex)
 		{
-			// Marked as well as forgotten. A service that answers after this finds the request gone from
-			// the active list, but only after it has already written an account into a player nobody is
-			// signing in any more; the flag is what a late answer checks before it touches anything.
+			// Marked as well as forgotten: a late answer finds the request gone from the active list only
+			// after it has written an account into a player nobody is signing in, so it checks this flag.
 			Request->bCancelled = true;
 
 			// The steps that already finished stand; what was in flight is simply no longer waited for.
-			SetUserState(User, User->GetAccountId().IsValid() ? EModularUserState::LoggedInLocally : EModularUserState::Unknown);
+			const auto RemainingAccount = User->GetAccountId();
+			SetUserState(User, RemainingAccount.IsValid() ? EModularUserState::LoggedInLocally : EModularUserState::Unknown);
 
 			ActiveLogins.RemoveAt(Index);
 			bCancelledAny = true;
@@ -610,11 +600,10 @@ bool UModularUserSubsystem::LogoutLocalUser(const int32 LocalPlayerIndex)
 
 	if (User->bIsGuest)
 	{
-		// A guest has nothing on any service; forgetting them is the whole of signing them out.
+		// A guest has nothing on any service; forgetting them is the whole of signing them out. The state
+		// is set before the record goes, or the event says a state changed and carries one that did not.
+		SetUserState(User, EModularUserState::Unknown);
 		Users.Remove(LocalPlayerIndex);
-
-		OnUserStateChanged.Broadcast(User);
-		K2_OnUserStateChanged.Broadcast(User);
 
 		return true;
 	}
@@ -661,9 +650,8 @@ bool UModularUserSubsystem::LogoutLocalUser(const int32 LocalPlayerIndex)
 	}
 	else
 	{
+		SetUserState(User, EModularUserState::Unknown);
 		Users.Remove(LocalPlayerIndex);
-		OnUserStateChanged.Broadcast(User);
-		K2_OnUserStateChanged.Broadcast(User);
 	}
 
 	return true;
@@ -671,9 +659,8 @@ bool UModularUserSubsystem::LogoutLocalUser(const int32 LocalPlayerIndex)
 
 void UModularUserSubsystem::AdvanceLogin(const TSharedRef<FLoginRequest>& Request)
 {
-	// The login walks its steps in order and never goes back, and a step that reached a service returns
-	// from here to be carried on by the answer. So this runs each remaining step at most once and stops
-	// at the one step that is not a step.
+	// The login walks its steps in order and never goes back; a step that reached a service returns from
+	// here and is carried on by the answer, so each remaining step runs at most once.
 	while (Request->Step != EModularLoginStep::Finished)
 	{
 		if (!ActiveLogins.Contains(Request))
@@ -693,9 +680,8 @@ void UModularUserSubsystem::AdvanceLogin(const TSharedRef<FLoginRequest>& Reques
 
 		if (Request->Failure.IsSet())
 		{
-			// A required step failed. Before giving up, see whether this player is allowed to play as a
-			// guest of the primary one instead, which is what a second controller at the same machine
-			// does on a platform that has no second account for it.
+			// A required step failed. Before giving up, see whether this player may sit as a guest of the
+			// primary one - what a second controller does on a platform with no second account.
 			if (CanBecomeGuest(Request))
 			{
 				UE_LOG(LogModularOnline, Log, TEXT("Player %d could not sign in (%s) and continues as a guest."),
@@ -704,9 +690,8 @@ void UModularUserSubsystem::AdvanceLogin(const TSharedRef<FLoginRequest>& Reques
 				User->bIsGuest = true;
 				Request->Failure.Reset();
 
-				// The privilege step is skipped from here, and a guest has nothing to ask a service about
-				// anyway - but somebody has to write down that they may play, or every reader of the
-				// privilege sees an answer nobody ever gave.
+				// The privilege step is skipped from here and a guest has nothing to ask about anyway, but
+				// their permission to play has to be written down or every reader sees no answer at all.
 				UpdatePrivilege(User, EModularOnlinePrivilege::CanPlay, EModularOnlinePrivilegeResult::Available, EModularOnlineRole::Default);
 			}
 
@@ -1011,7 +996,7 @@ bool UModularUserSubsystem::RunTransferAuth(const TSharedRef<FLoginRequest>& Req
 		ServiceAuth->Login(MoveTemp(LoginParams)).OnComplete(this, [this, Request](const UE::Online::TOnlineResult<UE::Online::FAuthLogin>& LoginResult)
 		{
 			const auto SignedInUser = Request->User.Get();
-			if (!SignedInUser)
+			if (!SignedInUser || Request->bCancelled)
 			{
 				ActiveLogins.Remove(Request);
 
@@ -1072,6 +1057,24 @@ bool UModularUserSubsystem::RunServiceLogin(const TSharedRef<FLoginRequest>& Req
 	return StartAutoLogin(Request, EModularOnlineRole::Service);
 }
 
+EModularOnlinePrivilegeResult UModularUserSubsystem::AnswerUnaskedPrivilege(const EModularOnlinePrivilege Privilege) const
+{
+	// A platform that says it gates players and cannot be asked is a configuration that cannot be honoured.
+	// Elsewhere a provider that gates nobody grants; Steam had no privileges component on 2026-09-15.
+	if (HasTrait(ModularUserTags::Trait_RequiresPrivilegeCheck.GetTag()))
+	{
+		UE_LOG(LogModularOnline, Error, TEXT("This platform requires a privilege check and its provider has no privileges component; %s cannot be answered."),
+			*LexToString(Privilege));
+
+		return EModularOnlinePrivilegeResult::PlatformFailure;
+	}
+
+	UE_LOG(LogModularOnline, Verbose, TEXT("No privileges component on this provider; %s is taken as granted."), *LexToString(Privilege));
+
+	return EModularOnlinePrivilegeResult::Available;
+}
+
+
 bool UModularUserSubsystem::RunPrivilegeCheck(const TSharedRef<FLoginRequest>& Request)
 {
 	if (GetStepPolicy(EModularLoginStep::PrivilegeCheck, Request->Params) == EModularStepPolicy::Skip)
@@ -1101,32 +1104,24 @@ bool UModularUserSubsystem::RunPrivilegeCheck(const TSharedRef<FLoginRequest>& R
 	}
 
 	// Asked of the platform, because that is what gates a player: a parental control, an age rating and a
-	// multiplayer entitlement belong to the console or the store the player signed into, not to whichever
-	// backend the project happens to carry its matches on.
+	// multiplayer entitlement belong to the console or store they signed into, not to the match backend.
 	const auto Role = EModularOnlineRole::Platform;
 	const auto Privileges = Online ? Online->GetInterface<UE::Online::IPrivileges>(Role) : nullptr;
 	const auto Privilege = Request->Params.RequestedPrivilege;
 
 	if (!Privileges.IsValid())
 	{
-		// A platform that says it gates players and then cannot be asked is a configuration that cannot be
-		// honoured, and taking the answer as granted is exactly the quiet wrong answer certification looks
-		// for. Everywhere else - Steam, for one - a provider that does not gate grants.
-		if (HasTrait(ModularUserTags::Trait_RequiresPrivilegeCheck.GetTag()))
+		const auto Unasked = AnswerUnaskedPrivilege(Privilege);
+		UpdatePrivilege(User, Privilege, Unasked, Role);
+
+		if (Unasked == EModularOnlinePrivilegeResult::Available)
 		{
-			UE_LOG(LogModularOnline, Error, TEXT("This platform requires a privilege check and its provider has no privileges component; %s cannot be answered."),
-				*LexToString(Privilege));
-
-			ApplyStepResult(Request, FModularOnlineResult::FromOnlineError(UE::Online::Errors::NotImplemented()));
-
-			return false;
+			ApplyStepResult(Request, FModularOnlineResult::Success());
 		}
-
-		UE_LOG(LogModularOnline, Verbose, TEXT("No privileges component on this provider; %s is taken as granted."),
-			*LexToString(Privilege));
-
-		UpdatePrivilege(User, Privilege, EModularOnlinePrivilegeResult::Available, Role);
-		ApplyStepResult(Request, FModularOnlineResult::Success());
+		else
+		{
+			ApplyStepResult(Request, FModularOnlineResult::FromOnlineError(UE::Online::Errors::NotImplemented()));
+		}
 
 		return false;
 	}
@@ -1139,9 +1134,8 @@ bool UModularUserSubsystem::RunPrivilegeCheck(const TSharedRef<FLoginRequest>& R
 		return false;
 	}
 
-	// A project that publishes on both roles decides what to publish by whether this account may cross
-	// play, and nothing else asks. Left unasked, the answer is a cached nothing and every search narrows
-	// itself "because this account may not cross play" - which nobody ever found out.
+	// A project publishing on both roles decides what to publish by this answer, and nothing else asks it.
+	// Left unasked it is a cached nothing, and every search narrows itself on a no nobody ever gave.
 	if (const auto CrossPlay = GetDefault<UModularCrossPlaySettings>();
 		CrossPlay && CrossPlay->CrossPlayPolicy == EModularCrossPlayPolicy::BothRoles && Privilege != EModularOnlinePrivilege::CanUseCrossPlay)
 	{
@@ -1206,7 +1200,7 @@ void UModularUserSubsystem::QueryPrivilege(const UModularUserInfo* User, const E
 
 	if (!Privileges.IsValid())
 	{
-		UpdatePrivilege(MutableUser, Privilege, EModularOnlinePrivilegeResult::Available, Role);
+		UpdatePrivilege(MutableUser, Privilege, AnswerUnaskedPrivilege(Privilege), Role);
 
 		return;
 	}

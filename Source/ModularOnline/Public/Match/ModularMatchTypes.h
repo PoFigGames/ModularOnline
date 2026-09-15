@@ -113,8 +113,11 @@ enum class EModularMatchLeaveReason : uint8
 	/** They lost their connection. */
 	Disconnected,
 
-	/** The host removed them. */
+	/** The host removed them from the match. */
 	Kicked,
+
+	/** The server refused the connection: a login it turned down, a wrong password, a full server. */
+	Refused,
 
 	/** The match itself went away. */
 	Closed

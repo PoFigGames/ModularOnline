@@ -9,6 +9,13 @@
 
 #include UE_INLINE_GENERATED_CPP_BY_NAME(ModularAchievementsSubsystem)
 
+void UModularAchievementsSubsystem::AnnounceAchievements(const TArray<FModularAchievement>& Achievements, const FModularOnlineResult& Result, const FModularAchievementsDelegate& OnComplete)
+{
+	OnComplete.ExecuteIfBound(Achievements, Result);
+	OnAchievementsQueried.Broadcast(Achievements, Result);
+	K2_OnAchievementsQueried.Broadcast(Achievements, Result);
+}
+
 void UModularAchievementsSubsystem::Deinitialize()
 {
 	UnlockedHandle = UE::Online::FOnlineEventDelegateHandle { };
@@ -50,14 +57,14 @@ bool UModularAchievementsSubsystem::QueryAchievements(const int32 LocalPlayerInd
 
 	if (!Achievements.IsValid())
 	{
-		OnComplete.ExecuteIfBound(TArray<FModularAchievement> { }, MissingFeature());
+		AnnounceAchievements(TArray<FModularAchievement> { }, MissingFeature(), OnComplete);
 
 		return false;
 	}
 
 	if (!Account.IsValid())
 	{
-		OnComplete.ExecuteIfBound(TArray<FModularAchievement> { }, NotSignedIn());
+		AnnounceAchievements(TArray<FModularAchievement> { }, NotSignedIn(), OnComplete);
 
 		return false;
 	}
@@ -70,7 +77,7 @@ bool UModularAchievementsSubsystem::QueryAchievements(const int32 LocalPlayerInd
 	{
 		if (DefinitionsResult.IsError())
 		{
-			OnComplete.ExecuteIfBound(TArray<FModularAchievement> { }, FModularOnlineResult::FromOnlineError(DefinitionsResult.GetErrorValue()));
+			AnnounceAchievements(TArray<FModularAchievement> { }, FModularOnlineResult::FromOnlineError(DefinitionsResult.GetErrorValue()), OnComplete);
 
 			return;
 		}
@@ -78,7 +85,7 @@ bool UModularAchievementsSubsystem::QueryAchievements(const int32 LocalPlayerInd
 		const auto Achievements = GetInterface<UE::Online::IAchievements>();
 		if (!Achievements.IsValid())
 		{
-			OnComplete.ExecuteIfBound(TArray<FModularAchievement> { }, MissingFeature());
+			AnnounceAchievements(TArray<FModularAchievement> { }, MissingFeature(), OnComplete);
 
 			return;
 		}
@@ -87,7 +94,7 @@ bool UModularAchievementsSubsystem::QueryAchievements(const int32 LocalPlayerInd
 		{
 			if (StatesResult.IsError())
 			{
-				OnComplete.ExecuteIfBound(TArray<FModularAchievement> { }, FModularOnlineResult::FromOnlineError(StatesResult.GetErrorValue()));
+				AnnounceAchievements(TArray<FModularAchievement> { }, FModularOnlineResult::FromOnlineError(StatesResult.GetErrorValue()), OnComplete);
 
 				return;
 			}
@@ -95,7 +102,7 @@ bool UModularAchievementsSubsystem::QueryAchievements(const int32 LocalPlayerInd
 			TArray<FModularAchievement> Found;
 			GetAchievements(LocalPlayerIndex, Found);
 
-			OnComplete.ExecuteIfBound(Found, FModularOnlineResult::Success());
+			AnnounceAchievements(Found, FModularOnlineResult::Success(), OnComplete);
 		});
 	});
 
@@ -141,8 +148,13 @@ bool UModularAchievementsSubsystem::GetAchievements(const int32 LocalPlayerIndex
 			// ordinary case and not a failure worth reporting.
 			if (const auto State = Achievements->GetAchievementState({ Account, Id }); State.IsOk())
 			{
-				Achievement.UnlockTime = State.GetOkValue().AchievementState.UnlockTime;
-				Achievement.bIsUnlocked = Achievement.UnlockTime != FDateTime { };
+				const auto& Earned = State.GetOkValue().AchievementState;
+
+				// Progress is what the interface calls the answer - "a value of 1.0 means the achievement
+				// is unlocked" - and a provider that fills in no unlock time would otherwise read as locked.
+				Achievement.Progress = Earned.Progress;
+				Achievement.UnlockTime = Earned.UnlockTime;
+				Achievement.bIsUnlocked = Earned.Progress >= 1.0f;
 			}
 
 			Achievement.IconUrl = Achievement.bIsUnlocked ? Found.UnlockedIconUrl : Found.LockedIconUrl;
@@ -170,7 +182,7 @@ bool UModularAchievementsSubsystem::UnlockAchievements(const int32 LocalPlayerIn
 
 	// The answer is nobody's to wait for, but a refusal that nothing reports is a write that
 	// silently did not happen.
-	Achievements->UnlockAchievements(MoveTemp(Params)).OnComplete(this, [](const UE::Online::TOnlineResult<UE::Online::FUnlockAchievements>& Result)
+	Achievements->UnlockAchievements(MoveTemp(Params)).OnComplete(this, [this](const UE::Online::TOnlineResult<UE::Online::FUnlockAchievements>& Result)
 	{
 		UE_CLOG(Result.IsError(), LogModularOnline, Warning, TEXT("The services refused to unlock an achievement: %s"), *Result.GetErrorValue().GetLogString());
 	});
@@ -191,5 +203,7 @@ bool UModularAchievementsSubsystem::ShowAchievementsUI(const int32 LocalPlayerIn
 	UE::Online::FDisplayAchievementUI::Params Params;
 	Params.LocalAccountId = Account;
 
-	return Achievements->DisplayAchievementUI(MoveTemp(Params)).IsOk();
+	const auto Shown = Achievements->DisplayAchievementUI(MoveTemp(Params));
+
+	return Shown.IsOk();
 }

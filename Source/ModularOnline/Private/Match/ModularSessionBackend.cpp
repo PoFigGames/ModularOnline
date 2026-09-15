@@ -19,7 +19,7 @@ namespace PoFigGames::Online
 			switch (Value.VariantType)
 			{
 			case UE::Online::ESchemaAttributeType::String:
-				return Value.GetString();
+				return IModularMatchBackend::DescribePublishedText(Value.GetString());
 
 			case UE::Online::ESchemaAttributeType::Int64:
 				return ::LexToString(Value.GetInt64());
@@ -42,22 +42,37 @@ namespace PoFigGames::Online
 		{
 			switch (JoinPolicy)
 			{
-			case EModularMatchJoinPolicy::PublicNotAdvertised:
-				// Sessions have no "anyone with the address, but not listed": the nearest thing a provider
-				// offers is friends only, which is narrower. Said out loud, because a host who asked for
-				// one and got the other would otherwise never find out.
-				UE_LOG(LogModularOnline, Warning, TEXT("Sessions cannot publish a match unlisted; it is limited to friends instead."));
-
-				return UE::Online::ESessionJoinPolicy::FriendsOnly;
-
 			case EModularMatchJoinPolicy::InvitationOnly:
 				return UE::Online::ESessionJoinPolicy::InviteOnly;
 
+			case EModularMatchJoinPolicy::PublicNotAdvertised:
 			case EModularMatchJoinPolicy::PublicAdvertised:
 				break;
 			}
 
 			return UE::Online::ESessionJoinPolicy::Public;
+		}
+
+		/**
+		 * ESessionJoinPolicy had no "anyone with the address, but not listed" when it was checked on
+		 * 2026-09-15: the nearest thing it offers is friends only, which is a different audience. Narrowing
+		 * a host's match without saying so is the quiet substitution this plugin refuses to make.
+		 */
+		static bool RefuseUnpublishableJoinPolicy(const EModularMatchJoinPolicy JoinPolicy, FModularMatchOperationDelegate& OnComplete)
+		{
+			if (JoinPolicy != EModularMatchJoinPolicy::PublicNotAdvertised)
+			{
+				return false;
+			}
+
+			UE_LOG(LogModularOnline, Error, TEXT("Sessions cannot publish a match unlisted; the match was refused rather than limited to friends."));
+
+			auto Refusal = FModularOnlineResult::FromOnlineError(UE::Online::Errors::NotImplemented());
+			Refusal.ErrorText = NSLOCTEXT("ModularOnline", "SessionsCannotPublishUnlisted", "This platform cannot publish an unlisted match.");
+
+			OnComplete.ExecuteIfBound(Refusal);
+
+			return true;
 		}
 
 		/** The settings a match publishes about itself, named as the project's schema names them. */
@@ -70,7 +85,7 @@ namespace PoFigGames::Online
 
 			if (const auto ConfiguredSettings = GetDefault<UModularMatchBackendSettings>())
 			{
-				SessionSettings.SchemaName = FName(*ConfiguredSettings->SessionSchemaId);
+				SessionSettings.SchemaName = ConfiguredSettings->SessionSchemaId.IsEmpty() ? FName { } : FName(*ConfiguredSettings->SessionSchemaId);
 
 				if (!ConfiguredSettings->MatchNameAttribute.IsNone() && !Settings.Name.IsEmpty())
 				{
@@ -89,6 +104,25 @@ namespace PoFigGames::Online
 			}
 
 			return SessionSettings;
+		}
+
+		/** Refuses a match the project never named a schema for; the services would answer InvalidParams and no more. */
+		static bool RefuseUnconfiguredSchema(FModularMatchOperationDelegate& OnComplete)
+		{
+			const auto ConfiguredSettings = GetDefault<UModularMatchBackendSettings>();
+			if (ConfiguredSettings && !ConfiguredSettings->SessionSchemaId.IsEmpty())
+			{
+				return false;
+			}
+
+			UE_LOG(LogModularOnline, Error, TEXT("No session schema is configured; set SessionSchemaId in [ModularOnline.Matches] to the schema the project declares."));
+
+			auto Refusal = FModularOnlineResult::FromOnlineError(UE::Online::Errors::InvalidParams());
+			Refusal.ErrorText = NSLOCTEXT("ModularOnline", "NoSessionSchema", "This build has no match schema configured.");
+
+			OnComplete.ExecuteIfBound(Refusal);
+
+			return true;
 		}
 
 		/** The sessions of a context, or nothing when the provider has none. */
@@ -160,7 +194,10 @@ namespace PoFigGames::Online
 	{
 		if (const auto Session = FindOwnSession(Context))
 		{
-			OutMatch = DescribeSession(*Session).Handle;
+			// Only the handle, not the whole description: this is asked on every travel and every leave,
+			// and the settings it would walk are of no interest to any of them.
+			OutMatch.SessionId = Session->GetSessionId();
+			OutMatch.Id = ToLogString(Session->GetSessionId());
 
 			return true;
 		}
@@ -175,6 +212,11 @@ namespace PoFigGames::Online
 		{
 			Private::AnswerNoSessions(OnComplete);
 
+			return;
+		}
+
+		if (Private::RefuseUnpublishableJoinPolicy(Settings.JoinPolicy, OnComplete) || Private::RefuseUnconfiguredSchema(OnComplete))
+		{
 			return;
 		}
 
@@ -296,7 +338,9 @@ namespace PoFigGames::Online
 	void FModularSessionBackend::InviteToMatch(const FModularMatchContext& Context, const UE::Online::FAccountId& TargetAccount, FModularMatchOperationDelegate OnComplete)
 	{
 		const auto Sessions = Private::GetSessions(Context);
-		if (!Sessions.IsValid() || !FindOwnSession(Context).IsValid())
+		const auto Own = FindOwnSession(Context);
+
+		if (!Sessions.IsValid() || !Own.IsValid())
 		{
 			OnComplete.ExecuteIfBound(FModularOnlineResult::FromOnlineError(UE::Online::Errors::InvalidState()));
 
@@ -316,9 +360,9 @@ namespace PoFigGames::Online
 
 	void FModularSessionBackend::KickMember(const FModularMatchContext& Context, const UE::Online::FAccountId& TargetAccount, FModularMatchOperationDelegate OnComplete)
 	{
-		// The sessions interface has no notion of removing somebody else: a session is a record, not a
-		// room, and who is in it is decided by the server that owns it. A game that needs this kicks the
-		// player off the server, and the record follows.
+		// ISessions declared no way to remove somebody else when it was checked on 2026-09-15: a session is
+		// a record, not a room, and who is in it is decided by the server that owns it. A game that needs
+		// this kicks the player off the server, and the record follows.
 		OnComplete.ExecuteIfBound(FModularOnlineResult::NotSupported(ModularOnlineTags::Feature_Sessions));
 	}
 
@@ -334,6 +378,11 @@ namespace PoFigGames::Online
 			return;
 		}
 
+		if (Private::RefuseUnpublishableJoinPolicy(Settings.JoinPolicy, OnComplete))
+		{
+			return;
+		}
+
 		const auto NewSettings = Private::BuildSessionSettings(Settings);
 
 		UE::Online::FUpdateSessionSettings::Params Params;
@@ -343,18 +392,14 @@ namespace PoFigGames::Online
 		Params.Mutations.JoinPolicy = NewSettings.JoinPolicy;
 		Params.Mutations.UpdatedCustomSettings = NewSettings.CustomSettings;
 
-		// A setting the match no longer names comes off, or the previous match's mode and map stay
+		// A setting the match no longer names comes off, or the previous match's name and map stay
 		// advertised beside the current one. What the provider keeps under its own reserved names is left
 		// alone, exactly as it is for a lobby.
-		const auto Configured = GetDefault<UModularMatchBackendSettings>();
-		const auto Reserved = Configured ? Configured->ReservedAttributePrefix : FString { };
-
 		for (const auto& Published : Session->GetSessionSettings().CustomSettings)
 		{
 			const auto bStillPublished = NewSettings.CustomSettings.Contains(Published.Key);
-			const auto bBelongsToProvider = !Reserved.IsEmpty() && Published.Key.ToString().StartsWith(Reserved);
 
-			if (!bStillPublished && !bBelongsToProvider)
+			if (!bStillPublished && !IsProviderAttribute(Published.Key))
 			{
 				Params.Mutations.RemovedCustomSettings.Add(Published.Key);
 			}

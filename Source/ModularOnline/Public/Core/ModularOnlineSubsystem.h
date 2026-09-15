@@ -94,6 +94,9 @@ protected:
 	/** False until the contexts have been built once. */
 	mutable bool bContextsBuilt { false };
 
+	/** True when a service provider was configured and did not answer; the service role then has no provider at all. */
+	mutable bool bServiceProviderRefused { false };
+
 	/** Builds the contexts for the world this game instance is running, if that has not happened yet. */
 	MODULARONLINE_API void EnsureContexts() const;
 

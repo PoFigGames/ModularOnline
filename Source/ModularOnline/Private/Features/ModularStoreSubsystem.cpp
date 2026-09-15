@@ -12,6 +12,34 @@
 
 #include UE_INLINE_GENERATED_CPP_BY_NAME(ModularStoreSubsystem)
 
+void UModularStoreSubsystem::AnnounceOffers(const TArray<FModularStoreOffer>& Offers, const FModularOnlineResult& Result, const FModularStoreOffersDelegate& OnComplete)
+{
+	OnComplete.ExecuteIfBound(Offers, Result);
+	OnOffersQueried.Broadcast(Offers, Result);
+	K2_OnOffersQueried.Broadcast(Offers, Result);
+}
+
+void UModularStoreSubsystem::AnnounceEntitlements(const TArray<FModularEntitlement>& Entitlements, const FModularOnlineResult& Result, const FModularEntitlementsDelegate& OnComplete)
+{
+	OnComplete.ExecuteIfBound(Entitlements, Result);
+	OnEntitlementsQueried.Broadcast(Entitlements, Result);
+	K2_OnEntitlementsQueried.Broadcast(Entitlements, Result);
+}
+
+void UModularStoreSubsystem::AnnounceCheckout(const FString& TransactionId, const FModularOnlineResult& Result, const FModularCheckoutDelegate& OnComplete)
+{
+	OnComplete.ExecuteIfBound(TransactionId, Result);
+	OnCheckoutAnswered.Broadcast(TransactionId, Result);
+	K2_OnCheckoutAnswered.Broadcast(TransactionId, Result);
+}
+
+void UModularStoreSubsystem::AnnounceRedeemed(const FModularOnlineResult& Result, const FModularStoreOperationDelegate& OnComplete)
+{
+	OnComplete.ExecuteIfBound(Result);
+	OnRedeemAnswered.Broadcast(Result);
+	K2_OnRedeemAnswered.Broadcast(Result);
+}
+
 namespace PoFigGames::Online::Private
 {
 	/** One offer as a screen reads it, with the formatted prices kept as the store wrote them. */
@@ -105,14 +133,14 @@ bool UModularStoreSubsystem::QueryOffers(const int32 LocalPlayerIndex, const TAr
 
 	if (!Commerce.IsValid())
 	{
-		OnComplete.ExecuteIfBound(TArray<FModularStoreOffer> { }, MissingFeature());
+		AnnounceOffers(TArray<FModularStoreOffer> { }, MissingFeature(), OnComplete);
 
 		return false;
 	}
 
 	if (!Account.IsValid())
 	{
-		OnComplete.ExecuteIfBound(TArray<FModularStoreOffer> { }, NotSignedIn());
+		AnnounceOffers(TArray<FModularStoreOffer> { }, NotSignedIn(), OnComplete);
 
 		return false;
 	}
@@ -125,7 +153,7 @@ bool UModularStoreSubsystem::QueryOffers(const int32 LocalPlayerIndex, const TAr
 	{
 		if (Error)
 		{
-			OnComplete.ExecuteIfBound(TArray<FModularStoreOffer> { }, FModularOnlineResult::FromOnlineError(*Error));
+			AnnounceOffers(TArray<FModularStoreOffer> { }, FModularOnlineResult::FromOnlineError(*Error), OnComplete);
 
 			return;
 		}
@@ -133,7 +161,7 @@ bool UModularStoreSubsystem::QueryOffers(const int32 LocalPlayerIndex, const TAr
 		TArray<FModularStoreOffer> Offers;
 		GetOffers(LocalPlayerIndex, Offers);
 
-		OnComplete.ExecuteIfBound(Offers, FModularOnlineResult::Success());
+		AnnounceOffers(Offers, FModularOnlineResult::Success(), OnComplete);
 	};
 
 	if (OfferIds.IsEmpty())
@@ -141,7 +169,7 @@ bool UModularStoreSubsystem::QueryOffers(const int32 LocalPlayerIndex, const TAr
 		UE::Online::FCommerceQueryOffers::Params Params;
 		Params.LocalAccountId = Account;
 
-		Commerce->QueryOffers(MoveTemp(Params)).OnComplete(this, [AnswerFromCache](const UE::Online::TOnlineResult<UE::Online::FCommerceQueryOffers>& Result)
+		Commerce->QueryOffers(MoveTemp(Params)).OnComplete(this, [this, AnswerFromCache](const UE::Online::TOnlineResult<UE::Online::FCommerceQueryOffers>& Result)
 		{
 			AnswerFromCache(Result.IsError() ? &Result.GetErrorValue() : nullptr);
 		});
@@ -153,7 +181,7 @@ bool UModularStoreSubsystem::QueryOffers(const int32 LocalPlayerIndex, const TAr
 	Params.LocalAccountId = Account;
 	Params.OfferIds = OfferIds;
 
-	Commerce->QueryOffersById(MoveTemp(Params)).OnComplete(this, [AnswerFromCache](const UE::Online::TOnlineResult<UE::Online::FCommerceQueryOffersById>& Result)
+	Commerce->QueryOffersById(MoveTemp(Params)).OnComplete(this, [this, AnswerFromCache](const UE::Online::TOnlineResult<UE::Online::FCommerceQueryOffersById>& Result)
 	{
 		AnswerFromCache(Result.IsError() ? &Result.GetErrorValue() : nullptr);
 	});
@@ -198,14 +226,14 @@ bool UModularStoreSubsystem::Checkout(const int32 LocalPlayerIndex, const TArray
 
 	if (!Commerce.IsValid())
 	{
-		OnComplete.ExecuteIfBound(FString { }, MissingFeature());
+		AnnounceCheckout(FString { }, MissingFeature(), OnComplete);
 
 		return false;
 	}
 
 	if (!Account.IsValid())
 	{
-		OnComplete.ExecuteIfBound(FString { }, NotSignedIn());
+		AnnounceCheckout(FString { }, NotSignedIn(), OnComplete);
 
 		return false;
 	}
@@ -214,7 +242,7 @@ bool UModularStoreSubsystem::Checkout(const int32 LocalPlayerIndex, const TArray
 	{
 		UE_LOG(LogModularOnline, Warning, TEXT("A checkout was asked for with nothing in it."));
 
-		OnComplete.ExecuteIfBound(FString { }, FModularOnlineResult::FromOnlineError(UE::Online::Errors::InvalidParams()));
+		AnnounceCheckout(FString { }, FModularOnlineResult::FromOnlineError(UE::Online::Errors::InvalidParams()), OnComplete);
 
 		return false;
 	}
@@ -230,17 +258,17 @@ bool UModularStoreSubsystem::Checkout(const int32 LocalPlayerIndex, const TArray
 		Params.Offers.Add(UE::Online::FPurchaseOffer { Line.OfferId, FMath::Max(1, Line.Quantity) });
 	}
 
-	Commerce->Checkout(MoveTemp(Params)).OnComplete(this, [OnComplete](const UE::Online::TOnlineResult<UE::Online::FCommerceCheckout>& Result)
+	Commerce->Checkout(MoveTemp(Params)).OnComplete(this, [this, OnComplete](const UE::Online::TOnlineResult<UE::Online::FCommerceCheckout>& Result)
 	{
 		if (Result.IsError())
 		{
-			OnComplete.ExecuteIfBound(FString { }, FModularOnlineResult::FromOnlineError(Result.GetErrorValue()));
+			AnnounceCheckout(FString { }, FModularOnlineResult::FromOnlineError(Result.GetErrorValue()), OnComplete);
 
 			return;
 		}
 
 		// Not every store hands back a transaction; the ones that do not report the purchase on the event.
-		OnComplete.ExecuteIfBound(Result.GetOkValue().TransactionId.Get(FString { }), FModularOnlineResult::Success());
+		AnnounceCheckout(Result.GetOkValue().TransactionId.Get(FString { }), FModularOnlineResult::Success(), OnComplete);
 	});
 
 	return true;
@@ -253,14 +281,14 @@ bool UModularStoreSubsystem::QueryEntitlements(const int32 LocalPlayerIndex, con
 
 	if (!Commerce.IsValid())
 	{
-		OnComplete.ExecuteIfBound(TArray<FModularEntitlement> { }, MissingFeature());
+		AnnounceEntitlements(TArray<FModularEntitlement> { }, MissingFeature(), OnComplete);
 
 		return false;
 	}
 
 	if (!Account.IsValid())
 	{
-		OnComplete.ExecuteIfBound(TArray<FModularEntitlement> { }, NotSignedIn());
+		AnnounceEntitlements(TArray<FModularEntitlement> { }, NotSignedIn(), OnComplete);
 
 		return false;
 	}
@@ -275,7 +303,7 @@ bool UModularStoreSubsystem::QueryEntitlements(const int32 LocalPlayerIndex, con
 	{
 		if (Result.IsError())
 		{
-			OnComplete.ExecuteIfBound(TArray<FModularEntitlement> { }, FModularOnlineResult::FromOnlineError(Result.GetErrorValue()));
+			AnnounceEntitlements(TArray<FModularEntitlement> { }, FModularOnlineResult::FromOnlineError(Result.GetErrorValue()), OnComplete);
 
 			return;
 		}
@@ -284,7 +312,7 @@ bool UModularStoreSubsystem::QueryEntitlements(const int32 LocalPlayerIndex, con
 		TArray<FModularEntitlement> Entitlements;
 		GetEntitlements(LocalPlayerIndex, Entitlements);
 
-		OnComplete.ExecuteIfBound(Entitlements, FModularOnlineResult::Success());
+		AnnounceEntitlements(Entitlements, FModularOnlineResult::Success(), OnComplete);
 	});
 
 	return true;
@@ -327,14 +355,14 @@ bool UModularStoreSubsystem::RedeemEntitlement(const int32 LocalPlayerIndex, con
 
 	if (!Commerce.IsValid())
 	{
-		OnComplete.ExecuteIfBound(MissingFeature());
+		AnnounceRedeemed(MissingFeature(), OnComplete);
 
 		return false;
 	}
 
 	if (!Account.IsValid())
 	{
-		OnComplete.ExecuteIfBound(NotSignedIn());
+		AnnounceRedeemed(NotSignedIn(), OnComplete);
 
 		return false;
 	}
@@ -344,9 +372,9 @@ bool UModularStoreSubsystem::RedeemEntitlement(const int32 LocalPlayerIndex, con
 	Params.EntitlementId = EntitlementId;
 	Params.Quantity = FMath::Max(1, Quantity);
 
-	Commerce->RedeemEntitlement(MoveTemp(Params)).OnComplete(this, [OnComplete](const UE::Online::TOnlineResult<UE::Online::FCommerceRedeemEntitlement>& Result)
+	Commerce->RedeemEntitlement(MoveTemp(Params)).OnComplete(this, [this, OnComplete](const UE::Online::TOnlineResult<UE::Online::FCommerceRedeemEntitlement>& Result)
 	{
-		OnComplete.ExecuteIfBound(Result.IsError() ? FModularOnlineResult::FromOnlineError(Result.GetErrorValue()) : FModularOnlineResult::Success());
+		AnnounceRedeemed(Result.IsError() ? FModularOnlineResult::FromOnlineError(Result.GetErrorValue()) : FModularOnlineResult::Success(), OnComplete);
 	});
 
 	return true;
@@ -369,7 +397,7 @@ bool UModularStoreSubsystem::ShowStoreUI(const int32 LocalPlayerIndex)
 
 	// The answer is nobody's to wait for, but a refusal that nothing reports is a write that
 	// silently did not happen.
-	Commerce->ShowStoreUI(MoveTemp(Params)).OnComplete(this, [](const UE::Online::TOnlineResult<UE::Online::FCommerceShowStoreUI>& Result)
+	Commerce->ShowStoreUI(MoveTemp(Params)).OnComplete(this, [this](const UE::Online::TOnlineResult<UE::Online::FCommerceShowStoreUI>& Result)
 	{
 		UE_CLOG(Result.IsError(), LogModularOnline, Warning, TEXT("The services refused to open the store: %s"), *Result.GetErrorValue().GetLogString());
 	});

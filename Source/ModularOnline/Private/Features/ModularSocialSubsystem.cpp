@@ -9,6 +9,13 @@
 
 #include UE_INLINE_GENERATED_CPP_BY_NAME(ModularSocialSubsystem)
 
+void UModularSocialSubsystem::AnnounceFriends(const TArray<FModularFriend>& Friends, const FModularOnlineResult& Result, const FModularFriendsDelegate& OnComplete)
+{
+	OnComplete.ExecuteIfBound(Friends, Result);
+	OnFriendsQueried.Broadcast(Friends, Result);
+	K2_OnFriendsQueried.Broadcast(Friends, Result);
+}
+
 namespace PoFigGames::Online::Private
 {
 	/** What the services call a relationship, in the words this plugin speaks. */
@@ -90,14 +97,14 @@ bool UModularSocialSubsystem::QueryFriends(const int32 LocalPlayerIndex, FModula
 
 	if (!Social.IsValid())
 	{
-		OnComplete.ExecuteIfBound(TArray<FModularFriend> { }, MissingFeature());
+		AnnounceFriends(TArray<FModularFriend> { }, MissingFeature(), OnComplete);
 
 		return false;
 	}
 
 	if (!Account.IsValid())
 	{
-		OnComplete.ExecuteIfBound(TArray<FModularFriend> { }, NotSignedIn());
+		AnnounceFriends(TArray<FModularFriend> { }, NotSignedIn(), OnComplete);
 
 		return false;
 	}
@@ -108,7 +115,7 @@ bool UModularSocialSubsystem::QueryFriends(const int32 LocalPlayerIndex, FModula
 	{
 		if (Result.IsError())
 		{
-			OnComplete.ExecuteIfBound(TArray<FModularFriend> { }, FModularOnlineResult::FromOnlineError(Result.GetErrorValue()));
+			AnnounceFriends(TArray<FModularFriend> { }, FModularOnlineResult::FromOnlineError(Result.GetErrorValue()), OnComplete);
 
 			return;
 		}
@@ -117,7 +124,7 @@ bool UModularSocialSubsystem::QueryFriends(const int32 LocalPlayerIndex, FModula
 		TArray<FModularFriend> Friends;
 		GetFriends(LocalPlayerIndex, Friends);
 
-		OnComplete.ExecuteIfBound(Friends, FModularOnlineResult::Success());
+		AnnounceFriends(Friends, FModularOnlineResult::Success(), OnComplete);
 	});
 
 	return true;
@@ -162,7 +169,7 @@ bool UModularSocialSubsystem::SendFriendInvite(const int32 LocalPlayerIndex, con
 		return false;
 	}
 
-	Social->SendFriendInvite({ Account, Target }).OnComplete(this, [](const UE::Online::TOnlineResult<UE::Online::FSendFriendInvite>& Result)
+	Social->SendFriendInvite({ Account, Target }).OnComplete(this, [this](const UE::Online::TOnlineResult<UE::Online::FSendFriendInvite>& Result)
 		{
 			UE_CLOG(Result.IsError(), LogModularOnline, Warning, TEXT("The services refused to send a friend invite: %s"), *ToLogString(Result.GetErrorValue()));
 		});
@@ -183,14 +190,14 @@ bool UModularSocialSubsystem::RespondToFriendInvite(const int32 LocalPlayerIndex
 
 	if (bAccept)
 	{
-		Social->AcceptFriendInvite({ Account, Target }).OnComplete(this, [](const UE::Online::TOnlineResult<UE::Online::FAcceptFriendInvite>& Result)
+		Social->AcceptFriendInvite({ Account, Target }).OnComplete(this, [this](const UE::Online::TOnlineResult<UE::Online::FAcceptFriendInvite>& Result)
 		{
 			UE_CLOG(Result.IsError(), LogModularOnline, Warning, TEXT("The services refused to accept a friend invite: %s"), *ToLogString(Result.GetErrorValue()));
 		});
 	}
 	else
 	{
-		Social->RejectFriendInvite({ Account, Target }).OnComplete(this, [](const UE::Online::TOnlineResult<UE::Online::FRejectFriendInvite>& Result)
+		Social->RejectFriendInvite({ Account, Target }).OnComplete(this, [this](const UE::Online::TOnlineResult<UE::Online::FRejectFriendInvite>& Result)
 		{
 			UE_CLOG(Result.IsError(), LogModularOnline, Warning, TEXT("The services refused to reject a friend invite: %s"), *ToLogString(Result.GetErrorValue()));
 		});

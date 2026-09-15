@@ -34,7 +34,7 @@ plugin is that layer, written once against the interfaces rather than against a 
 
 ## Requirements
 
-- Unreal Engine 5.6 or newer. Developed against 5.8.
+- Unreal Engine 5.8. That is the version it is built and tested against; no older one has been tried.
 - The engine's `OnlineServices` and `OnlineSubsystemUtils` plugins, which this one enables for you.
 - At least one Online Services provider. The engine ships `OnlineServicesNull` and `OnlineServicesEOS`;
   Steam is available through a separate plugin.
@@ -67,8 +67,8 @@ does not implement one answers `NotSupported` — not a crash, not silence.
 
 **Dedicated servers.** A machine with no players signs in as itself and hosts with the account the
 services give it. Proving that a joining player is the account they claim is not this layer's job: it
-belongs to the connection, before there is a login to refuse, and so to whatever carries that connection.
-Our Steam provider does it in a packet handler; the engine's own Steam plugin does the same.
+belongs to the connection, before there is a login to refuse, and so to whatever carries that connection
+— a packet handler or the provider's own token exchange, depending on the platform.
 
 ---
 
@@ -158,6 +158,7 @@ FeatureRole=Platform
 
 [ModularOnline.Matches]
 MatchBackend=Lobbies
+LobbySchemaId=GameLobby
 MatchNameAttribute=Name
 MatchMapAttribute=Map
 ; Attributes a provider publishes about the match itself, which an update must not take off.
@@ -177,9 +178,10 @@ DefaultAvatarAttribute=AvatarUrl
 DefaultServerCredentialsType=Auto
 ```
 
-Attribute names are configuration because they differ per provider and per project: the names above have
-to exist in your lobby or session schema, and a name the schema does not know is refused by the service
-rather than ignored.
+Schema and attribute names are configuration because they differ per provider and per project, and the
+plugin ships none of them as a default: the names above have to exist in your lobby or session schema, a
+name the schema does not know is refused by the service rather than ignored, and a match layer with no
+schema id refuses to host rather than guess one.
 
 ---
 
@@ -216,8 +218,9 @@ because "this platform cannot do that at all" asks the graph to hide a button fo
 asks it to show a message. Finding matches answers with the list instead, on two pins, and the list is
 carried on both so a browser can bind one function to each. Every node answers exactly once.
 
-Everything else is a call plus an event on the subsystem: `K2_QueryFriends` and `On Friends Updated`,
-and so on for each facade.
+Everything else is a call plus an event on the subsystem: `Query Friends` answers on `On Friends Queried`,
+and so on for each facade — every request says when it finished and how, and what it fetched is then read
+from the cache.
 
 ---
 

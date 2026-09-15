@@ -19,8 +19,8 @@ public static class ModularOnlineDefaults
 		var warnings = module.CppCompileWarningSettings;
 
 		// A local hiding a member reads as the wrong thing entirely. MSVC also reports a local hiding a
-		// member of a base class (C4458) where clang reports nothing, so name locals apart from inherited
-		// members even when the local build is happy.
+		// member of a base class (C4458) where clang reported nothing when the two were compared on
+		// 2026-09-15, so name locals apart from inherited members even when the local build is happy.
 		warnings.ShadowVariableWarningLevel = WarningLevel.Error;
 
 		// This plugin switches over engine enums that keep growing between versions, and over its own.
@@ -28,8 +28,8 @@ public static class ModularOnlineDefaults
 		warnings.EnumEnumConversionWarningLevel = WarningLevel.Error;
 		warnings.EnumFloatConversionWarningLevel = WarningLevel.Error;
 
-		// A switch over an enum with no default label has to name every value. MSVC keeps its counterpart
-		// (C4062) off, so this one bites on clang first.
+		// A switch over an enum with no default label has to name every value. MSVC kept its counterpart
+		// (C4062) off when this was checked on 2026-09-15, so this one bites on clang first.
 		warnings.SwitchWarningLevel = WarningLevel.Error;
 
 		// Comparisons and operators which cannot mean what they say.
@@ -55,11 +55,12 @@ public class ModularOnline : ModuleRules
 			[
 				"Core",
 				"CoreOnline",
+				// UDeveloperSettings, UGameInstanceSubsystem and the travel types, all of them in public
+				// headers: a module that includes one of ours must not have to name these itself.
+				"DeveloperSettings",
+				"Engine",
 				"GameplayTags",
 				"OnlineServicesInterface",
-				// The world scoped GetServices, which is what keeps two clients of a play in editor session
-				// from sharing one login.
-				"OnlineSubsystemUtils",
 			]
 		);
 
@@ -68,10 +69,11 @@ public class ModularOnline : ModuleRules
 				// The device mapper, which is what tells local players and their controllers apart.
 				"ApplicationCore",
 				"CoreUObject",
-				"DeveloperSettings",
 				// FKey and the viewport key handler, which is what a press start screen listens on.
 				"InputCore",
-				"Engine",
+				// The world scoped GetServices, which is what keeps two clients of a play in editor session
+				// from sharing one login.
+				"OnlineSubsystemUtils",
 			]
 		);
 	}

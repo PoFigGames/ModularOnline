@@ -17,6 +17,10 @@ namespace UE::Online
 /** How a request about achievements ends. */
 DECLARE_DELEGATE_TwoParams(FModularAchievementsDelegate, const TArray<FModularAchievement>& /*Achievements*/, const FModularOnlineResult& /*Result*/);
 
+/** The answer to a query this subsystem was asked for; what it fetched is in the cache. */
+DECLARE_MULTICAST_DELEGATE_TwoParams(FModularAchievementsQueriedEvent, const TArray<FModularAchievement>& /*Achievements*/, const FModularOnlineResult& /*Result*/);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FModularAchievementsQueriedDynamic, const TArray<FModularAchievement>&, Achievements, const FModularOnlineResult&, Result);
+
 /** One or more achievements were earned. */
 DECLARE_MULTICAST_DELEGATE_OneParam(FModularAchievementsUnlockedEvent, const TArray<FString>& /*AchievementIds*/);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FModularAchievementsUnlockedDynamic, const TArray<FString>&, AchievementIds);
@@ -36,7 +40,10 @@ public:
 	/** Fired when the services say an achievement was earned, however it was earned. */
 	FModularAchievementsUnlockedEvent OnAchievementsUnlocked { };
 
-#pragma region UModularFeatureSubsystem
+/** Fired when a query finishes, with what it fetched and how it ended. */
+	FModularAchievementsQueriedEvent OnAchievementsQueried { };
+
+	#pragma region UModularFeatureSubsystem
 
 	MODULARONLINE_API virtual void Deinitialize() override;
 	MODULARONLINE_API virtual FGameplayTag GetFeatureTag() const override;
@@ -56,6 +63,12 @@ public:
 	MODULARONLINE_API virtual bool ShowAchievementsUI(int32 LocalPlayerIndex);
 
 protected:
+	/** The same event, for Blueprint. */
+	UPROPERTY(BlueprintAssignable, Category = "ModularOnline|Achievements", meta = (DisplayName = "On Achievements Queried"))
+	FModularAchievementsQueriedDynamic K2_OnAchievementsQueried { };
+
+	/** Answers a query on the caller's delegate and on both events. */
+	MODULARONLINE_API void AnnounceAchievements(const TArray<FModularAchievement>& Achievements, const FModularOnlineResult& Result, const FModularAchievementsDelegate& OnComplete);
 	/** The same event, for Blueprint. */
 	UPROPERTY(BlueprintAssignable, Category = "ModularOnline|Achievements", meta = (DisplayName = "On Achievements Unlocked"))
 	FModularAchievementsUnlockedDynamic K2_OnAchievementsUnlocked { };

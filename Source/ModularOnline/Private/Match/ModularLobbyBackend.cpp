@@ -11,6 +11,34 @@
 
 namespace PoFigGames::Online
 {
+	bool IModularMatchBackend::IsProviderAttribute(const FName Attribute)
+	{
+		const auto Configured = GetDefault<UModularMatchBackendSettings>();
+		const auto Reserved = Configured ? Configured->ReservedAttributePrefix : FString { };
+
+		const auto Named = Attribute.ToString();
+
+		return !Reserved.IsEmpty() && Named.StartsWith(Reserved);
+	}
+
+	FString IModularMatchBackend::DescribePublishedText(const FString& Published)
+	{
+		constexpr int32 LongestShown { 256 };
+
+		FString Described;
+		Described.Reserve(FMath::Min(Published.Len(), LongestShown));
+
+		for (const auto Character : Published)
+		{
+			if (Described.Len() < LongestShown && !FChar::IsControl(Character))
+			{
+				Described.AppendChar(Character);
+			}
+		}
+
+		return Described;
+	}
+
 	namespace Private
 	{
 		/** What a lobby attribute looks like once it is a string, whatever the host published it as. */
@@ -19,7 +47,7 @@ namespace PoFigGames::Online
 			switch (Value.VariantType)
 			{
 			case UE::Online::ESchemaAttributeType::String:
-				return Value.GetString();
+				return IModularMatchBackend::DescribePublishedText(Value.GetString());
 
 			case UE::Online::ESchemaAttributeType::Int64:
 				return ::LexToString(Value.GetInt64());
@@ -115,8 +143,9 @@ namespace PoFigGames::Online
 		const auto MapAttribute = Settings ? Settings->MatchMapAttribute : FName { };
 		const auto MemberCountAttribute = Settings ? Settings->MatchMemberCountAttribute : FName { };
 
-		// Members are only listed for a lobby this player has joined, so counting them would show every
-		// match in a browser as empty. What the owner published is read below and wins where it is there.
+		// Members are only listed for a lobby this player has joined - so on 2026-09-15 on Steam - and
+		// counting them would show every match in a browser as empty. What the owner published is read
+		// below and wins where it is there.
 		auto Taken = Lobby.Members.Num();
 
 		for (const auto& Attribute : Lobby.Attributes)
@@ -171,7 +200,10 @@ namespace PoFigGames::Online
 	{
 		if (const auto Lobby = FindJoinedLobby(Context))
 		{
-			OutMatch = DescribeLobby(*Lobby).Handle;
+			// Only the handle, not the whole description: this is asked on every travel and every leave,
+			// and the attributes it would walk are of no interest to any of them.
+			OutMatch.LobbyId = Lobby->LobbyId;
+			OutMatch.Id = ToLogString(Lobby->LobbyId);
 
 			return true;
 		}
@@ -189,12 +221,38 @@ namespace PoFigGames::Online
 			return;
 		}
 
+		if (Settings.OnlineMode == EModularMatchOnlineMode::LAN)
+		{
+			// Lobbies are a service record: there is no local-network lobby to create, and publishing one
+			// online would answer a LAN request with an internet match nobody asked for.
+			UE_LOG(LogModularOnline, Error, TEXT("A LAN match cannot be carried by a lobby; set MatchBackend to Sessions to host one."));
+
+			Private::AnswerNotSupported(OnComplete);
+
+			return;
+		}
+
 		const auto ConfiguredSettings = GetDefault<UModularMatchBackendSettings>();
+		const auto SchemaId = ConfiguredSettings ? ConfiguredSettings->LobbySchemaId : FString { };
+
+		if (SchemaId.IsEmpty())
+		{
+			// The schema is the project's, not the plugin's: guessing a name here publishes a match under a
+			// schema the services never heard of and answers InvalidParams with nothing to go on.
+			UE_LOG(LogModularOnline, Error, TEXT("No lobby schema is configured; set LobbySchemaId in [ModularOnline.Matches] to the schema the project declares."));
+
+			auto Refusal = FModularOnlineResult::FromOnlineError(UE::Online::Errors::InvalidParams());
+			Refusal.ErrorText = NSLOCTEXT("ModularOnline", "NoLobbySchema", "This build has no match schema configured.");
+
+			OnComplete.ExecuteIfBound(Refusal);
+
+			return;
+		}
 
 		UE::Online::FCreateLobby::Params Params;
 		Params.LocalAccountId = Context.LocalAccount;
 		Params.LocalName = Context.LocalName;
-		Params.SchemaId = UE::Online::FSchemaId(ConfiguredSettings ? FName(*ConfiguredSettings->LobbySchemaId) : FName(TEXT("GameLobby")));
+		Params.SchemaId = UE::Online::FSchemaId(FName(*SchemaId));
 		Params.bPresenceEnabled = Settings.bUsePresence;
 		Params.MaxMembers = Settings.MaxPlayers;
 		Params.JoinPolicy = Private::ToLobbyJoinPolicy(Settings.JoinPolicy);
@@ -217,10 +275,10 @@ namespace PoFigGames::Online
 
 		const FString OfferedNames { Offered.ToString() };
 
-		Lobbies->CreateLobby(MoveTemp(Params)).OnComplete([OnComplete, OfferedNames](const UE::Online::TOnlineResult<UE::Online::FCreateLobby>& Result)
+		Lobbies->CreateLobby(MoveTemp(Params)).OnComplete([OnComplete, OfferedNames, SchemaId](const UE::Online::TOnlineResult<UE::Online::FCreateLobby>& Result)
 		{
-			UE_CLOG(!Result.IsOk(), LogModularOnline, Error, TEXT("The match was refused (%s). Attributes offered: %s. An attribute the schema of this provider does not name is refused rather than ignored."),
-				*ToLogString(Result.GetErrorValue()), *OfferedNames);
+			UE_CLOG(!Result.IsOk(), LogModularOnline, Error, TEXT("The match was refused (%s). Schema '%s', attributes offered: %s. An attribute the schema of this provider does not name is refused rather than ignored."),
+				*ToLogString(Result.GetErrorValue()), *SchemaId, *OfferedNames);
 
 			OnComplete.ExecuteIfBound(Result.IsOk() ? FModularOnlineResult::Success() : FModularOnlineResult::FromOnlineError(Result.GetErrorValue()));
 		});
@@ -373,15 +431,11 @@ namespace PoFigGames::Online
 		// An attribute the new settings no longer name is taken off, or the previous match stays advertised
 		// beside the current one. What the provider publishes about the lobby itself is not ours to remove:
 		// taking it off either has the update refused or blanks what a search filters on.
-		const auto Configured = GetDefault<UModularMatchBackendSettings>();
-		const auto Reserved = Configured ? Configured->ReservedAttributePrefix : FString { };
-
 		for (const auto& Published : Lobby->Attributes)
 		{
 			const auto bStillPublished = AttributeParams.UpdatedAttributes.Contains(Published.Key);
-			const auto bBelongsToProvider = !Reserved.IsEmpty() && Published.Key.ToString().StartsWith(Reserved);
 
-			if (!bStillPublished && !bBelongsToProvider)
+			if (!bStillPublished && !IsProviderAttribute(Published.Key))
 			{
 				AttributeParams.RemovedAttributes.Add(Published.Key);
 			}

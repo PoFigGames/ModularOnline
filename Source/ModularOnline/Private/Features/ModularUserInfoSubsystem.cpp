@@ -10,6 +10,13 @@
 
 #include UE_INLINE_GENERATED_CPP_BY_NAME(ModularUserInfoSubsystem)
 
+void UModularUserInfoSubsystem::AnnounceProfiles(const TArray<FModularUserProfile>& Profiles, const FModularOnlineResult& Result, const FModularUserProfilesDelegate& OnComplete)
+{
+	OnComplete.ExecuteIfBound(Profiles, Result);
+	OnProfilesQueried.Broadcast(Profiles, Result);
+	K2_OnProfilesQueried.Broadcast(Profiles, Result);
+}
+
 FGameplayTag UModularUserInfoSubsystem::GetFeatureTag() const
 {
 	return ModularOnlineTags::Feature_UserInfo;
@@ -22,14 +29,14 @@ bool UModularUserInfoSubsystem::QueryProfiles(const int32 LocalPlayerIndex, cons
 
 	if (!UserInfo.IsValid())
 	{
-		OnComplete.ExecuteIfBound(TArray<FModularUserProfile> { }, MissingFeature());
+		AnnounceProfiles(TArray<FModularUserProfile> { }, MissingFeature(), OnComplete);
 
 		return false;
 	}
 
 	if (!Account.IsValid())
 	{
-		OnComplete.ExecuteIfBound(TArray<FModularUserProfile> { }, NotSignedIn());
+		AnnounceProfiles(TArray<FModularUserProfile> { }, NotSignedIn(), OnComplete);
 
 		return false;
 	}
@@ -54,7 +61,7 @@ bool UModularUserInfoSubsystem::QueryProfiles(const int32 LocalPlayerIndex, cons
 	{
 		// Nothing this provider could be asked about. Answering empty rather than never answering keeps
 		// the caller from waiting for something that will not come.
-		OnComplete.ExecuteIfBound(TArray<FModularUserProfile> { }, FModularOnlineResult::Success());
+		AnnounceProfiles(TArray<FModularUserProfile> { }, FModularOnlineResult::Success(), OnComplete);
 
 		return true;
 	}
@@ -63,7 +70,7 @@ bool UModularUserInfoSubsystem::QueryProfiles(const int32 LocalPlayerIndex, cons
 	{
 		if (Result.IsError())
 		{
-			OnComplete.ExecuteIfBound(TArray<FModularUserProfile> { }, FModularOnlineResult::FromOnlineError(Result.GetErrorValue()));
+			AnnounceProfiles(TArray<FModularUserProfile> { }, FModularOnlineResult::FromOnlineError(Result.GetErrorValue()), OnComplete);
 
 			return;
 		}
@@ -80,7 +87,7 @@ bool UModularUserInfoSubsystem::QueryProfiles(const int32 LocalPlayerIndex, cons
 			}
 		}
 
-		OnComplete.ExecuteIfBound(Profiles, FModularOnlineResult::Success());
+		AnnounceProfiles(Profiles, FModularOnlineResult::Success(), OnComplete);
 	});
 
 	return true;
@@ -127,7 +134,7 @@ bool UModularUserInfoSubsystem::ShowProfile(const int32 LocalPlayerIndex, const 
 		return false;
 	}
 
-	UserInfo->ShowUserProfile({ Account, Target }).OnComplete(this, [](const UE::Online::TOnlineResult<UE::Online::FShowUserProfile>& Result)
+	UserInfo->ShowUserProfile({ Account, Target }).OnComplete(this, [this](const UE::Online::TOnlineResult<UE::Online::FShowUserProfile>& Result)
 		{
 			UE_CLOG(Result.IsError(), LogModularOnline, Warning, TEXT("The services refused to open a profile: %s"), *ToLogString(Result.GetErrorValue()));
 		});

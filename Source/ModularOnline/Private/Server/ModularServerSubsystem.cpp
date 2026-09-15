@@ -68,8 +68,26 @@ UE::Online::FAccountId UModularServerSubsystem::GetServerAccountId() const
 	return ServerAccount;
 }
 
+void UModularServerSubsystem::AnnounceServerLogin(const FModularOnlineResult& Result, const FModularServerLoginDelegate& OnComplete)
+{
+	OnComplete.ExecuteIfBound(Result);
+	OnServerLoginComplete.Broadcast(Result);
+	K2_OnServerLoginComplete.Broadcast(Result);
+}
+
 bool UModularServerSubsystem::LoginServer(FModularServerLoginDelegate OnComplete)
 {
+	if (IsServerLoggedIn())
+	{
+		// Asking again for a login this machine already has is not a failure: the services would answer
+		// AlreadyLoggedIn, which reads in a log as though the server had lost its account.
+		UE_LOG(LogModularOnline, Log, TEXT("The server is already signed in as %s."), *ToLogString(ServerAccount));
+
+		AnnounceServerLogin(FModularOnlineResult::Success(), OnComplete);
+
+		return true;
+	}
+
 	if (!bIsDedicatedServer)
 	{
 		// The credentials this signs in with belong to a machine, not to a person, and a machine that has
@@ -127,8 +145,7 @@ bool UModularServerSubsystem::LoginServer(FModularServerLoginDelegate OnComplete
 			UE_LOG(LogModularOnline, Error, TEXT("The server could not sign in: %s"), *Answer.ToLogString());
 		}
 
-		OnComplete.ExecuteIfBound(Answer);
-		OnServerLoginComplete.Broadcast(Answer);
+		AnnounceServerLogin(Answer, OnComplete);
 	});
 
 	return true;

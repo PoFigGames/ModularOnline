@@ -23,8 +23,9 @@ FString FModularMatchSettings::GetMapName() const
 		return MapAssetData.PackageName.ToString();
 	}
 
-	// An id can also carry the package path as its name, which is what an asset picker writes for a world
-	// the asset manager has not registered under that id. The path travels on its own.
+	// An id can also carry the package path as its name, which is what the editor's asset picker wrote for
+	// a world the asset manager has not registered under that id when it was checked on 2026-09-15. The
+	// path travels on its own.
 	if (const auto MapAssetName = MapId.PrimaryAssetName.ToString(); FPackageName::IsValidLongPackageName(MapAssetName))
 	{
 		return MapAssetName;
@@ -35,8 +36,17 @@ FString FModularMatchSettings::GetMapName() const
 
 FString FModularMatchSettings::ConstructTravelURL() const
 {
+	const auto MapName = GetMapName();
+
+	// A URL with options and no map is a relative one, and the engine fills the map in from wherever the
+	// game already is - which would travel it to itself instead of saying it cannot go.
+	if (MapName.IsEmpty())
+	{
+		return FString { };
+	}
+
 	TStringBuilder<256> Builder;
-	Builder.Append(GetMapName());
+	Builder.Append(MapName);
 
 	if (OnlineMode == EModularMatchOnlineMode::LAN)
 	{

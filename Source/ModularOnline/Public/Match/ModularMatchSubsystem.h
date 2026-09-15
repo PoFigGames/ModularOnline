@@ -3,9 +3,9 @@
 #pragma once
 
 #include "Core/ModularOnlineTypes.h"
+#include "Engine/EngineBaseTypes.h"
 #include "Match/ModularMatchBackend.h"
 #include "Match/ModularMatchTypes.h"
-#include "Engine/EngineBaseTypes.h"
 #include "Online/OnlineAsyncOpHandle.h"
 #include "Subsystems/GameInstanceSubsystem.h"
 
@@ -17,6 +17,7 @@ class UModularUserSubsystem;
 
 namespace UE::Online
 {
+	struct FLobby;
 	struct FLobbyInvitationAdded;
 	struct FLobbyJoined;
 	struct FLobbyLeft;
@@ -184,6 +185,14 @@ protected:
 	/** True once a search was narrowed for want of the cross play privilege, so the log says it once. */
 	bool bNarrowingLogged { false };
 
+	/**
+	 * True once the game has been told the local player is out of the match.
+	 *
+	 * Leaving is reported more than once: the services announce the member who left, then every member
+	 * still there, then the lobby itself. Only the first of those is the answer.
+	 */
+	bool bDepartureAnnounced { false };
+
 	/** True on a dedicated server, which hosts without a local player. */
 	bool bIsDedicatedServer { false };
 
@@ -215,8 +224,20 @@ protected:
 	/** The refusal every call answers with while the configured backend is not available here. */
 	MODULARONLINE_API FModularOnlineResult GetMissingBackendResult() const;
 
+	/**
+	 * Builds the context an operation needs, or says why it cannot be attempted at all.
+	 *
+	 * Two different answers: a platform with no such component can never do this, and a caller told so
+	 * hides the button for good; a player who is not signed in only has to sign in.
+	 */
+	MODULARONLINE_API FModularOnlineResult BuildContextOrRefusal(int32 LocalPlayerIndex, EModularOnlineRole Role,
+		const TSharedPtr<PoFigGames::Online::IModularMatchBackend>& InBackend, PoFigGames::Online::FModularMatchContext& OutContext) const;
+
 	/** Builds a backend of the asked kind and reports whether the role can actually carry it. */
 	MODULARONLINE_API TSharedPtr<PoFigGames::Online::IModularMatchBackend> MakeBackend(EModularMatchBackendKind Kind, EModularOnlineRole Role) const;
+
+	/** Refuses a request while an address from an earlier one is still waiting to be travelled to. */
+	MODULARONLINE_API FModularOnlineResult RefuseWhileTravelling() const;
 
 	/** Fills in who is asking and of which services, or returns false when nobody can ask. */
 	MODULARONLINE_API bool BuildContext(int32 LocalPlayerIndex, EModularOnlineRole Role, PoFigGames::Online::FModularMatchContext& OutContext) const;
@@ -237,7 +258,7 @@ protected:
 	/** The settings as they are published, with what this layer says about the match written in. */
 	MODULARONLINE_API FModularMatchSettings DescribeForPublication(const FModularMatchSettings& Settings, bool bCrossPlay, const FString& LinkedMatchId) const;
 
-	/** Announces a hosted match, holds places if the project asked for them, and travels. */
+	/** Announces a hosted match and travels to it. */
 	MODULARONLINE_API void CompleteHostedMatch(const FModularOnlineResult& Result, FModularMatchOperationDelegate OnComplete);
 
 	/** Folds a second role's results into the first's, dropping the ones that are the same match twice. */
@@ -252,17 +273,45 @@ protected:
 	/** Travels the listen server to the map of the match it just opened. */
 	MODULARONLINE_API void TravelToHostedMap();
 
-	/** Travels a joining client to the host, resolving the address through the services. */
-	MODULARONLINE_API void TravelToJoinedMatch(int32 LocalPlayerIndex);
+	/**
+	 * The address the match just joined is reached at, or why there is not one yet.
+	 *
+	 * A lobby is findable before the host's server is bound to it, so for a few seconds after a join there
+	 * is a match and no address.
+	 */
+	MODULARONLINE_API FModularOnlineResult ResolveJoinedMatch(int32 LocalPlayerIndex, FString& OutTravelURL) const;
+
+	/** Travels a joining client to an address the services already gave. */
+	MODULARONLINE_API void TravelToJoinedMatch(int32 LocalPlayerIndex, const FString& TravelURL);
+
+	/** Answers a join, on the caller's delegate and on both events. */
+	MODULARONLINE_API void AnswerJoin(const FModularOnlineResult& Result, const FModularMatchOperationDelegate& OnComplete);
+
+	/** Says the local player is out of the match, once, whichever of the services' events said so first. */
+	MODULARONLINE_API void AnnounceDeparture(EModularMatchLeaveReason Reason);
+
+	/** Whether an account is one a local player is signed in as on that role. */
+	MODULARONLINE_API bool IsLocalAccount(EModularOnlineRole Role, const UE::Online::FAccountId& AccountId) const;
+
+	/** Whether a lobby of the services is the one this subsystem published or joined. */
+	MODULARONLINE_API static bool IsOurLobby(const UE::Online::FLobby& Lobby);
+
+	/**
+	 * Whether a failed connection belongs to this game instance.
+	 *
+	 * The engine broadcasts these to everybody and names no world for a connection that failed before one
+	 * existed, so every game instance in a play in editor session hears every other's failures.
+	 */
+	MODULARONLINE_API bool OwnsFailedConnection(const UWorld* World, const UNetDriver* NetDriver) const;
 
 	/** Events of the lobbies. */
-	MODULARONLINE_API void HandleLobbyJoined(const UE::Online::FLobbyJoined& EventParameters);
+	MODULARONLINE_API void HandleLobbyJoined(const UE::Online::FLobbyJoined& EventParameters, EModularOnlineRole Role);
 
-	MODULARONLINE_API void HandleLobbyLeft(const UE::Online::FLobbyLeft& EventParameters);
+	MODULARONLINE_API void HandleLobbyLeft(const UE::Online::FLobbyLeft& EventParameters, EModularOnlineRole Role);
 
-	MODULARONLINE_API void HandleLobbyMemberJoined(const UE::Online::FLobbyMemberJoined& EventParameters);
+	MODULARONLINE_API void HandleLobbyMemberJoined(const UE::Online::FLobbyMemberJoined& EventParameters, EModularOnlineRole Role);
 
-	MODULARONLINE_API void HandleLobbyMemberLeft(const UE::Online::FLobbyMemberLeft& EventParameters);
+	MODULARONLINE_API void HandleLobbyMemberLeft(const UE::Online::FLobbyMemberLeft& EventParameters, EModularOnlineRole Role);
 
 	MODULARONLINE_API void HandleLobbyInvitation(const UE::Online::FLobbyInvitationAdded& EventParameters, EModularOnlineRole Role);
 
