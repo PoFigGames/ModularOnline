@@ -20,6 +20,13 @@ First public shape of the plugin. Everything below is implemented and builds; se
   each step required, optional or skipped according to the platform's own trait tags. Guest players,
   press start, user switching, input device assignment, and reaction to the player signing out behind
   the game's back.
+- **A refused login says why.** The online services answer a refused privilege with one generic
+  sentence, so the reason a player could act on would reach a screen only as the name of an enum.
+  `DescribePrivilegeRefusal` gives one localised sentence per result — parental controls, ownership, a
+  pending update, no network, the type or standing of the account — and a login that failed its
+  privilege check carries it in `ErrorText` beside the code in `ErrorId`. The privilege the login asked
+  for stays on the user, so a game can tell a refused `CanPlay` from a refused `CanPlayOnline` and
+  answer each where it matters rather than showing one dialog for both.
 - **Matches.** `IModularMatchBackend` with a lobby implementation and a session implementation, chosen
   by configuration. Hosting, searching, joining, inviting, kicking, updating settings, travel. A match
   publishes its name and its map; everything else it says about itself is named by the game, so the

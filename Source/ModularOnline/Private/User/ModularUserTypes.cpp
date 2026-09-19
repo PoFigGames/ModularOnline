@@ -6,6 +6,8 @@
 
 #include UE_INLINE_GENERATED_CPP_BY_NAME(ModularUserTypes)
 
+#define LOCTEXT_NAMESPACE "ModularOnline"
+
 UE::Online::EUserPrivileges FModularPrivilegeConversions::ToOnlineServices(const EModularOnlinePrivilege Privilege)
 {
 	using namespace UE::Online;
@@ -119,3 +121,44 @@ EModularOnlinePrivilegeResult FModularPrivilegeConversions::FromOnlineServices(c
 
 	return EModularOnlinePrivilegeResult::PlatformFailure;
 }
+
+namespace PoFigGames::Online
+{
+	FText DescribePrivilegeRefusal(const EModularOnlinePrivilegeResult Result)
+	{
+		switch (Result)
+		{
+		case EModularOnlinePrivilegeResult::Available:
+		case EModularOnlinePrivilegeResult::Unknown:
+			return FText { };
+
+		case EModularOnlinePrivilegeResult::NotLoggedIn:
+			return LOCTEXT("Privilege.NotLoggedIn", "No account is signed in. Sign in to the platform and try again.");
+
+		case EModularOnlinePrivilegeResult::LicenseInvalid:
+			return LOCTEXT("Privilege.LicenseInvalid", "This account does not own the game.");
+
+		case EModularOnlinePrivilegeResult::VersionOutdated:
+			return LOCTEXT("Privilege.VersionOutdated", "The game or the system has to be updated before it can be played.");
+
+		case EModularOnlinePrivilegeResult::NetworkUnavailable:
+			return LOCTEXT("Privilege.NetworkUnavailable", "The platform could not be reached. Check the connection and try again.");
+
+		case EModularOnlinePrivilegeResult::AgeRestricted:
+			return LOCTEXT("Privilege.AgeRestricted", "Parental controls on this account block the game.");
+
+		case EModularOnlinePrivilegeResult::AccountTypeRestricted:
+			return LOCTEXT("Privilege.AccountTypeRestricted", "This account is not of a type that may play the game.");
+
+		case EModularOnlinePrivilegeResult::AccountUseRestricted:
+			return LOCTEXT("Privilege.AccountUseRestricted", "The platform has restricted this account.");
+
+		case EModularOnlinePrivilegeResult::PlatformFailure:
+			break;
+		}
+
+		return LOCTEXT("Privilege.PlatformFailure", "The platform refused without giving a reason.");
+	}
+}
+
+#undef LOCTEXT_NAMESPACE

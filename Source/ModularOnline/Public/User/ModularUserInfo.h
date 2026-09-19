@@ -56,6 +56,9 @@ public:
 	/** How far this player got through signing in. */
 	EModularUserState State { EModularUserState::Unknown };
 
+	/** What the login in flight, or the last one, asked to be allowed to do. */
+	EModularOnlinePrivilege RequestedPrivilege { EModularOnlinePrivilege::CanPlay };
+
 	/** True when this player has no account of their own and plays as a guest of the primary one. */
 	bool bIsGuest { false };
 

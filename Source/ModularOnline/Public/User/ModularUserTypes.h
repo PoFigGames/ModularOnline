@@ -202,3 +202,15 @@ struct FModularPrivilegeConversions
 	static MODULARONLINE_API EModularOnlinePrivilege FromOnlineServices(UE::Online::EUserPrivileges Privilege);
 	static MODULARONLINE_API EModularOnlinePrivilegeResult FromOnlineServices(UE::Online::EUserPrivileges Privilege, UE::Online::EPrivilegeResults Results);
 };
+
+
+namespace PoFigGames::Online
+{
+	/**
+	 * Why the platform refused, worded for the player.
+	 *
+	 * The online services answer a refusal with one generic sentence, so the reason the player could act
+	 * on survives only in the result of the privilege query.
+	 */
+	MODULARONLINE_API FText DescribePrivilegeRefusal(EModularOnlinePrivilegeResult Result);
+}

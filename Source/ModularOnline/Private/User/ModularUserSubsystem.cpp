@@ -19,6 +19,7 @@
 
 #include UE_INLINE_GENERATED_CPP_BY_NAME(ModularUserSubsystem)
 
+using PoFigGames::Online::DescribePrivilegeRefusal;
 using PoFigGames::Online::LexToString;
 
 namespace PoFigGames::Online::Private
@@ -542,6 +543,7 @@ bool UModularUserSubsystem::LoginLocalUser(const FModularLoginParams& Params, FM
 
 	User->PlatformUser = ResolvedParams.PlatformUser;
 	User->PrimaryInputDevice = ResolvedParams.InputDevice;
+	User->RequestedPrivilege = ResolvedParams.RequestedPrivilege;
 
 	BindServiceEvents();
 	SetUserState(User, EModularUserState::LoggingIn);
@@ -1177,9 +1179,11 @@ bool UModularUserSubsystem::RunPrivilegeCheck(const TSharedRef<FLoginRequest>& R
 		}
 
 		// Strict: whatever the services answered other than "available" ends the login, and the reason
-		// travels with it so that a screen can say which one it was.
+		// travels with it so that a screen can say which one it was. The text of the online error names
+		// the refusal and not its reason, so it is replaced by the one the player can act on.
 		auto Failure = FModularOnlineResult::FromOnlineError(UE::Online::Errors::AccessDenied());
 		Failure.ErrorId = LexToString(Answer);
+		Failure.ErrorText = DescribePrivilegeRefusal(Answer);
 
 		CompleteStep(Request, Failure);
 	});
