@@ -5,6 +5,7 @@
 #include "Engine/Engine.h"
 #include "Engine/GameInstance.h"
 #include "Engine/World.h"
+#include "Core/ModularOnlineStringTable.h"
 #include "Core/ModularOnlineTags.h"
 #include "User/ModularUserSubsystem.h"
 
@@ -48,7 +49,7 @@ void UAsyncAction_ModularLoginUser::Activate()
 		Result.bWasSuccessful = false;
 		Result.Category = EModularOnlineErrorCategory::InvalidState;
 		Result.ErrorId = TEXT("login_request_refused");
-		Result.ErrorText = NSLOCTEXT("ModularOnline", "LoginRequestRefused", "This player cannot be signed in right now.");
+		Result.ErrorText = FText::FromStringTable(PoFigGames::Online::StringTableId, TEXT("LoginRequestRefused"));
 
 		FinishWithResult(Result);
 	}

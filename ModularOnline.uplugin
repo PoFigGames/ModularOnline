@@ -8,7 +8,7 @@
 	"CreatedBy": "PoFig Games Studio",
 	"CreatedByURL": "https://www.pofig.games",
 	"EnabledByDefault": false,
-	"CanContainContent": false,
+	"CanContainContent": true,
 	"IsBetaVersion": true,
 	"Modules": [
 		{
@@ -20,6 +20,13 @@
 			"Name": "ModularOnlineDeveloper",
 			"Type": "DeveloperTool",
 			"LoadingPhase": "Default"
+		}
+	],
+	"LocalizationTargets": [
+		{
+			"Name": "ModularOnline",
+			"LoadingPolicy": "Always",
+			"ConfigGenerationPolicy": "User"
 		}
 	],
 	"Plugins": [

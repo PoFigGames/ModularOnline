@@ -12,6 +12,7 @@
 #include "Match/ModularSessionBackend.h"
 #include "Core/ModularOnlineLogChannels.h"
 #include "Core/ModularOnlineSettings.h"
+#include "Core/ModularOnlineStringTable.h"
 #include "Core/ModularOnlineSubsystem.h"
 #include "Core/ModularOnlineTags.h"
 #include "Server/ModularServerSubsystem.h"
@@ -1522,7 +1523,7 @@ FModularOnlineResult UModularMatchSubsystem::RefuseWhileTravelling() const
 	UE_LOG(LogModularOnline, Warning, TEXT("A match is already waiting to travel to '%s'; the new request was refused."), *PendingTravelURL);
 
 	auto Refusal = FModularOnlineResult::FromOnlineError(UE::Online::Errors::AlreadyPending());
-	Refusal.ErrorText = NSLOCTEXT("ModularOnline", "MatchAlreadyTravelling", "The match is already opening somewhere else.");
+	Refusal.ErrorText = FText::FromStringTable(PoFigGames::Online::StringTableId, TEXT("MatchAlreadyTravelling"));
 
 	return Refusal;
 }
@@ -1540,8 +1541,8 @@ FModularOnlineResult UModularMatchSubsystem::BuildContextOrRefusal(const int32 L
 		auto Refusal = FModularOnlineResult::FromOnlineError(UE::Online::Errors::NotLoggedIn());
 
 		Refusal.ErrorText = bIsDedicatedServer
-			? NSLOCTEXT("ModularOnline", "ServerNotSignedIn", "This server is not signed in to the online service.")
-			: NSLOCTEXT("ModularOnline", "PlayerNotSignedIn", "You are not signed in to the online service.");
+			? FText::FromStringTable(PoFigGames::Online::StringTableId, TEXT("ServerNotSignedIn"))
+			: FText::FromStringTable(PoFigGames::Online::StringTableId, TEXT("PlayerNotSignedIn"));
 
 		return Refusal;
 	}

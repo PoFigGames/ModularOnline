@@ -77,6 +77,13 @@ Two diagnostics bite on clang before they bite on MSVC, and a Windows-only build
 a parameter or local hiding a member of a base class, and a switch over an enum with no default label
 that misses an enumerator. Write for the stricter compiler.
 
+## Text
+
+A sentence a player can see goes into the string table asset `/ModularOnline/StringTables/ModularOnline` and
+is read with `FText::FromStringTable`; `LOCTEXT` at the call site is not used. Adding or changing
+one means regenerating the translations (see the README) in the same pull request: the string table test
+fails for a sentence whose translation was made from different English.
+
 ## Blueprint surface
 
 Blueprint support lives in the runtime module, not in one of its own. A call is a `K2_` wrapper over the

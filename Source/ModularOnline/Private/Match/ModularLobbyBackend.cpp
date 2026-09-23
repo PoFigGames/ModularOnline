@@ -4,6 +4,7 @@
 
 #include "Core/ModularOnlineLogChannels.h"
 #include "Core/ModularOnlineSettings.h"
+#include "Core/ModularOnlineStringTable.h"
 #include "Core/ModularOnlineTags.h"
 #include "Online/OnlineAsyncOpHandle.h"
 #include "Online/OnlineErrorDefinitions.h"
@@ -242,7 +243,7 @@ namespace PoFigGames::Online
 			UE_LOG(LogModularOnline, Error, TEXT("No lobby schema is configured; set LobbySchemaId in [ModularOnline.Matches] to the schema the project declares."));
 
 			auto Refusal = FModularOnlineResult::FromOnlineError(UE::Online::Errors::InvalidParams());
-			Refusal.ErrorText = NSLOCTEXT("ModularOnline", "NoLobbySchema", "This build has no match schema configured.");
+			Refusal.ErrorText = FText::FromStringTable(PoFigGames::Online::StringTableId, TEXT("NoMatchSchema"));
 
 			OnComplete.ExecuteIfBound(Refusal);
 

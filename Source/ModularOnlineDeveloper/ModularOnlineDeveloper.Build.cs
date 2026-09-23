@@ -17,6 +17,8 @@ public class ModularOnlineDeveloper : ModuleRules
 				"GameplayTags",
 				"ModularOnline",
 				"OnlineServicesInterface",
+				// IPluginManager, which is where the tests find the plugin's own translations.
+				"Projects",
 			]
 		);
 	}

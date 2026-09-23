@@ -27,6 +27,7 @@ plugin is that layer, written once against the interfaces rather than against a 
 - [Configuration](#configuration)
 - [Using it from C++](#using-it-from-c)
 - [Using it from Blueprint](#using-it-from-blueprint)
+- [Localisation](#localisation)
 - [What it does not do](#what-it-does-not-do)
 - [Licence](#licence)
 
@@ -221,6 +222,32 @@ carried on both so a browser can bind one function to each. Every node answers e
 Everything else is a call plus an event on the subsystem: `Query Friends` answers on `On Friends Queried`,
 and so on for each facade — every request says when it finished and how, and what it fetched is then read
 from the cache.
+
+---
+
+## Localisation
+
+Every sentence the plugin shows a player comes from one string table asset,
+`/ModularOnline/StringTables/ModularOnline`, edited in the editor's String Table editor. Call sites read it by
+its id with `FText::FromStringTable`; none of them carries text of its own. The engine loads the table the
+first time a sentence is asked for, and because only code refers to it, the plugin's `Config/Game.ini` adds
+its folder to the directories the cooker always cooks.
+
+English and Russian ship with the plugin in `Content/Localization/ModularOnline` and load on their own:
+the plugin declares a localisation target, so the engine finds the translations and packaging stages
+them. A packaged game still only carries the cultures its project stages (`CulturesToStage`).
+
+To change a sentence or add a language, edit the table, add the culture to
+`Config/Localization/ModularOnline.ini`, and run the engine's pipeline over that file:
+
+```
+UnrealEditor-Cmd YourProject.uproject -run=GatherText -config="Plugins/Online/ModularOnline/Config/Localization/ModularOnline.ini" -unattended
+```
+
+The first run writes a `.po` per culture; translate it and run again to compile. The paths in that config
+name where the plugin sits inside the project, so a project that mounts it elsewhere adjusts them before
+regenerating. An English sentence changed without regenerating shows in English in every other language,
+and the `ModularOnline.Core.StringTable` test fails until the translations catch up.
 
 ---
 

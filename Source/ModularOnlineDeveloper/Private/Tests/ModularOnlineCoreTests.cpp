@@ -1,6 +1,11 @@
 // Copyright PoFig Games Studio. All Rights Reserved.
 
 #include "Containers/Ticker.h"
+#include "Interfaces/IPluginManager.h"
+#include "Internationalization/Internationalization.h"
+#include "Internationalization/StringTable.h"
+#include "Internationalization/StringTableCore.h"
+#include "Internationalization/TextLocalizationResource.h"
 #include "Misc/AutomationTest.h"
 
 #include "Match/ModularLobbyBackend.h"
@@ -674,6 +679,71 @@ bool FModularPresenceStatesTest::RunTest(const FString& /*Parameters*/)
 
 	TestNotNull(TEXT("A second state is found too"), Settings->FindState(FGameplayTag::RequestGameplayTag(TEXT("Online.Feature.Social"))));
 	TestNull(TEXT("And one still undescribed is not"), Settings->FindState(ModularOnlineTags::Feature_Auth.GetTag()));
+
+	return true;
+}
+
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FModularOnlineStringTableTest, "ModularOnline.Core.StringTable", PoFigGames::Online::Tests::TestFlags)
+
+bool FModularOnlineStringTableTest::RunTest(const FString& /*Parameters*/)
+{
+	// Asked the way the plugin asks, before anything has loaded the asset: by its id, which loads it on first use.
+	const auto Refusal = FModularOnlineResult::NotSupported(ModularOnlineTags::Feature_Lobbies);
+	TestEqual(TEXT("A plugin sentence is read from the asset"), Refusal.ErrorText.ToString(),
+		FString::Printf(TEXT("%s is not available on this platform."), *ModularOnlineTags::Feature_Lobbies.GetTag().ToString()));
+
+	const auto Asset = LoadObject<UStringTable>(nullptr, TEXT("/ModularOnline/StringTables/ModularOnline.ModularOnline"));
+	const auto Plugin = IPluginManager::Get().FindPlugin(TEXT("ModularOnline"));
+
+	TestNotNull(TEXT("The plugin's string table asset loads"), Asset);
+	TestTrue(TEXT("The plugin is found"), Plugin.IsValid());
+
+	if (Asset && Plugin.IsValid())
+	{
+		const auto Table = Asset->GetStringTable();
+
+		FTextLocalizationResource Russian;
+		const auto RussianPath = Plugin->GetContentDir() / TEXT("Localization/ModularOnline/ru/ModularOnline.locres");
+
+		TestTrue(TEXT("The Russian translation loads"), Russian.LoadFromFile(RussianPath, 0));
+
+		const FTextKey Namespace { Table->GetNamespace() };
+		auto EntryCount = 0;
+
+		// The hash ties a translation to the English it was made from: after the English changes, the engine shows
+		// English again, and this is where that shows up instead of in a build.
+		Table->EnumerateKeysAndSourceStrings([this, &Russian, &Namespace, &EntryCount](const FTextKey& Key, const FString& Source)
+		{
+			const auto Name = Key.ToString();
+			const auto Translated = Russian.Entries.Find(FTextId(Namespace, Key));
+			const auto bTranslated = Translated && Translated->LocalizedString.IsValid() && !Translated->LocalizedString->IsEmpty();
+
+			TestFalse(*FString::Printf(TEXT("'%s' has English text"), *Name), Source.IsEmpty());
+			TestTrue(*FString::Printf(TEXT("'%s' has a Russian translation"), *Name), bTranslated);
+			TestTrue(*FString::Printf(TEXT("'%s' is translated from its current English text"), *Name),
+				Translated && Translated->SourceStringHash == FTextLocalizationResource::HashString(Source));
+
+			++EntryCount;
+
+			return true;
+		});
+
+		TestTrue(TEXT("The table is not empty"), EntryCount > 0);
+
+		// The file alone proves nothing about the plugin's localisation target, which is what puts it in front of the text.
+		const auto Expected = Russian.Entries.Find(FTextId(Namespace, FTextKey(TEXT("MatchHasNoRoom"))));
+
+		FInternationalization::FCultureStateSnapshot Previous;
+		FInternationalization::Get().BackupCultureState(Previous);
+		FInternationalization::Get().SetCurrentCulture(TEXT("ru"));
+
+		const auto Shown = FText::FromStringTable(Asset->GetStringTableId(), TEXT("MatchHasNoRoom"));
+		TestTrue(TEXT("A sentence of the table shows in Russian under the Russian culture"),
+			Expected && Expected->LocalizedString.IsValid() && Shown.ToString() == *Expected->LocalizedString);
+
+		FInternationalization::Get().RestoreCultureState(Previous);
+	}
 
 	return true;
 }

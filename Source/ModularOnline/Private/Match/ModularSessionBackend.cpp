@@ -4,6 +4,7 @@
 
 #include "Core/ModularOnlineLogChannels.h"
 #include "Core/ModularOnlineSettings.h"
+#include "Core/ModularOnlineStringTable.h"
 #include "Core/ModularOnlineTags.h"
 #include "Online/OnlineAsyncOpHandle.h"
 #include "Online/OnlineErrorDefinitions.h"
@@ -68,7 +69,7 @@ namespace PoFigGames::Online
 			UE_LOG(LogModularOnline, Error, TEXT("Sessions cannot publish a match unlisted; the match was refused rather than limited to friends."));
 
 			auto Refusal = FModularOnlineResult::FromOnlineError(UE::Online::Errors::NotImplemented());
-			Refusal.ErrorText = NSLOCTEXT("ModularOnline", "SessionsCannotPublishUnlisted", "This platform cannot publish an unlisted match.");
+			Refusal.ErrorText = FText::FromStringTable(PoFigGames::Online::StringTableId, TEXT("SessionsCannotPublishUnlisted"));
 
 			OnComplete.ExecuteIfBound(Refusal);
 
@@ -118,7 +119,7 @@ namespace PoFigGames::Online
 			UE_LOG(LogModularOnline, Error, TEXT("No session schema is configured; set SessionSchemaId in [ModularOnline.Matches] to the schema the project declares."));
 
 			auto Refusal = FModularOnlineResult::FromOnlineError(UE::Online::Errors::InvalidParams());
-			Refusal.ErrorText = NSLOCTEXT("ModularOnline", "NoSessionSchema", "This build has no match schema configured.");
+			Refusal.ErrorText = FText::FromStringTable(PoFigGames::Online::StringTableId, TEXT("NoMatchSchema"));
 
 			OnComplete.ExecuteIfBound(Refusal);
 

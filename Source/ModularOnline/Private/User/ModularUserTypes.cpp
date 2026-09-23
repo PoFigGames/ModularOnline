@@ -2,11 +2,10 @@
 
 #include "User/ModularUserTypes.h"
 
+#include "Core/ModularOnlineStringTable.h"
 #include "Online/Privileges.h"
 
 #include UE_INLINE_GENERATED_CPP_BY_NAME(ModularUserTypes)
-
-#define LOCTEXT_NAMESPACE "ModularOnline"
 
 UE::Online::EUserPrivileges FModularPrivilegeConversions::ToOnlineServices(const EModularOnlinePrivilege Privilege)
 {
@@ -133,32 +132,30 @@ namespace PoFigGames::Online
 			return FText { };
 
 		case EModularOnlinePrivilegeResult::NotLoggedIn:
-			return LOCTEXT("Privilege.NotLoggedIn", "No account is signed in. Sign in to the platform and try again.");
+			return FText::FromStringTable(PoFigGames::Online::StringTableId, TEXT("Privilege.NotLoggedIn"));
 
 		case EModularOnlinePrivilegeResult::LicenseInvalid:
-			return LOCTEXT("Privilege.LicenseInvalid", "This account does not own the game.");
+			return FText::FromStringTable(PoFigGames::Online::StringTableId, TEXT("Privilege.LicenseInvalid"));
 
 		case EModularOnlinePrivilegeResult::VersionOutdated:
-			return LOCTEXT("Privilege.VersionOutdated", "The game or the system has to be updated before it can be played.");
+			return FText::FromStringTable(PoFigGames::Online::StringTableId, TEXT("Privilege.VersionOutdated"));
 
 		case EModularOnlinePrivilegeResult::NetworkUnavailable:
-			return LOCTEXT("Privilege.NetworkUnavailable", "The platform could not be reached. Check the connection and try again.");
+			return FText::FromStringTable(PoFigGames::Online::StringTableId, TEXT("Privilege.NetworkUnavailable"));
 
 		case EModularOnlinePrivilegeResult::AgeRestricted:
-			return LOCTEXT("Privilege.AgeRestricted", "Parental controls on this account block the game.");
+			return FText::FromStringTable(PoFigGames::Online::StringTableId, TEXT("Privilege.AgeRestricted"));
 
 		case EModularOnlinePrivilegeResult::AccountTypeRestricted:
-			return LOCTEXT("Privilege.AccountTypeRestricted", "This account is not of a type that may play the game.");
+			return FText::FromStringTable(PoFigGames::Online::StringTableId, TEXT("Privilege.AccountTypeRestricted"));
 
 		case EModularOnlinePrivilegeResult::AccountUseRestricted:
-			return LOCTEXT("Privilege.AccountUseRestricted", "The platform has restricted this account.");
+			return FText::FromStringTable(PoFigGames::Online::StringTableId, TEXT("Privilege.AccountUseRestricted"));
 
 		case EModularOnlinePrivilegeResult::PlatformFailure:
 			break;
 		}
 
-		return LOCTEXT("Privilege.PlatformFailure", "The platform refused without giving a reason.");
+		return FText::FromStringTable(PoFigGames::Online::StringTableId, TEXT("Privilege.PlatformFailure"));
 	}
 }
-
-#undef LOCTEXT_NAMESPACE

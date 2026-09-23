@@ -57,10 +57,14 @@ First public shape of the plugin. Everything below is implemented and builds; se
   provider publishes about a match itself are recognised by a configured prefix and left alone when the
   game updates its own. No schema id, attribute name or account key ships as a default: a project names
   them or the match layer refuses to publish, rather than guessing at somebody else's schema.
+- **Localisation.** Every sentence shown to a player comes from the plugin's string table asset, and
+  English and Russian ship with the plugin as its own localisation target, loaded, cooked and staged by
+  the engine without the project doing anything.
 - **Console commands.** `ModularOnline.Status`, `.Refresh`, `.HasFeature`.
-- **Automation tests.** Sixteen, over the parts that are pure rules: error mapping, role resolution,
+- **Automation tests.** Seventeen, over the parts that are pure rules: error mapping, role resolution,
   cross play policy, presence states, match handles, settings, published text, reserved attributes, the
-  merge of two searches, and which steps a login walks when nobody signs anybody in.
+  merge of two searches, which steps a login walks when nobody signs anybody in, and a translation for
+  every sentence of the string table made from its current English.
 
 ### Not yet verified
 

@@ -2,14 +2,13 @@
 
 #include "Match/ModularMatchTypes.h"
 
+#include "Core/ModularOnlineStringTable.h"
 #include "AssetRegistry/AssetData.h"
 #include "Engine/AssetManager.h"
 #include "Misc/App.h"
 #include "Misc/PackageName.h"
 
 #include UE_INLINE_GENERATED_CPP_BY_NAME(ModularMatchTypes)
-
-#define LOCTEXT_NAMESPACE "ModularOnline"
 
 bool FModularMatchHandle::IsValid() const
 {
@@ -81,14 +80,14 @@ bool FModularMatchSettings::Validate(FText& OutError) const
 {
 	if (GetMapName().IsEmpty())
 	{
-		OutError = FText::Format(LOCTEXT("MatchHasNoMap", "There is no map registered as {0}, so this match cannot be hosted."), FText::FromString(MapId.ToString()));
+		OutError = FText::Format(FText::FromStringTable(PoFigGames::Online::StringTableId, TEXT("MatchHasNoMap")), FText::FromString(MapId.ToString()));
 
 		return false;
 	}
 
 	if (MaxPlayers < 1)
 	{
-		OutError = LOCTEXT("MatchHasNoRoom", "A match has to have room for at least one player.");
+		OutError = FText::FromStringTable(PoFigGames::Online::StringTableId, TEXT("MatchHasNoRoom"));
 
 		return false;
 	}
@@ -96,12 +95,10 @@ bool FModularMatchSettings::Validate(FText& OutError) const
 #if !WITH_SERVER_CODE
 	// A client build carries no server code at all, so there is nothing in it to host with. Games that
 	// need a client to host something - a tutorial, a practice range - ship those as server capable.
-	OutError = LOCTEXT("ClientCannotHost", "This build cannot host a match.");
+	OutError = FText::FromStringTable(PoFigGames::Online::StringTableId, TEXT("ClientCannotHost"));
 
 	return false;
 #else
 	return true;
 #endif
 }
-
-#undef LOCTEXT_NAMESPACE

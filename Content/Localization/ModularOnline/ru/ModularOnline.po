@@ -1,0 +1,143 @@
+﻿# ModularOnline Russian translation.
+# Copyright PoFig Games Studio. All Rights Reserved.
+# 
+msgid ""
+msgstr ""
+"Project-Id-Version: ModularOnline\n"
+"POT-Creation-Date: 2026-09-23 14:18\n"
+"PO-Revision-Date: 2026-09-23 14:18\n"
+"Language-Team: \n"
+"Language: ru\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=3; plural=(n%10==1 && n%100!=11 ? 0 : n%10>=2 && n%10<=4 && (n%100<10 || n%100>=20) ? 1 : 2);\n"
+
+#. Key:	ClientCannotHost
+#. SourceLocation:	/ModularOnline/StringTables/ModularOnline.ModularOnline
+#: /ModularOnline/StringTables/ModularOnline.ModularOnline
+msgctxt "ModularOnline,ClientCannotHost"
+msgid "This build cannot host a match."
+msgstr "Эта сборка не может создавать матчи."
+
+#. Key:	FeatureNotSupported
+#. SourceLocation:	/ModularOnline/StringTables/ModularOnline.ModularOnline
+#. DevNotes:	{0} is the missing feature, e.g. Online.Feature.Lobbies.
+#: /ModularOnline/StringTables/ModularOnline.ModularOnline
+msgctxt "ModularOnline,FeatureNotSupported"
+msgid "{0} is not available on this platform."
+msgstr "На этой платформе недоступно: {0}."
+
+#. Key:	LoginRequestRefused
+#. SourceLocation:	/ModularOnline/StringTables/ModularOnline.ModularOnline
+#: /ModularOnline/StringTables/ModularOnline.ModularOnline
+msgctxt "ModularOnline,LoginRequestRefused"
+msgid "This player cannot be signed in right now."
+msgstr "Сейчас этот игрок не может войти в систему."
+
+#. Key:	MatchAlreadyTravelling
+#. SourceLocation:	/ModularOnline/StringTables/ModularOnline.ModularOnline
+#: /ModularOnline/StringTables/ModularOnline.ModularOnline
+msgctxt "ModularOnline,MatchAlreadyTravelling"
+msgid "The match is already opening somewhere else."
+msgstr "Матч уже открывается на другой карте."
+
+#. Key:	MatchHasNoMap
+#. SourceLocation:	/ModularOnline/StringTables/ModularOnline.ModularOnline
+#. DevNotes:	{0} is the map's primary asset id.
+#: /ModularOnline/StringTables/ModularOnline.ModularOnline
+msgctxt "ModularOnline,MatchHasNoMap"
+msgid "There is no map registered as {0}, so this match cannot be hosted."
+msgstr "Карта {0} не зарегистрирована, поэтому этот матч нельзя создать."
+
+#. Key:	MatchHasNoRoom
+#. SourceLocation:	/ModularOnline/StringTables/ModularOnline.ModularOnline
+#: /ModularOnline/StringTables/ModularOnline.ModularOnline
+msgctxt "ModularOnline,MatchHasNoRoom"
+msgid "A match has to have room for at least one player."
+msgstr "В матче должно быть место хотя бы для одного игрока."
+
+#. Key:	NoMatchSchema
+#. SourceLocation:	/ModularOnline/StringTables/ModularOnline.ModularOnline
+#: /ModularOnline/StringTables/ModularOnline.ModularOnline
+msgctxt "ModularOnline,NoMatchSchema"
+msgid "This build has no match schema configured."
+msgstr "В этой сборке не настроена схема матча."
+
+#. Key:	PlayerNotSignedIn
+#. SourceLocation:	/ModularOnline/StringTables/ModularOnline.ModularOnline
+#: /ModularOnline/StringTables/ModularOnline.ModularOnline
+msgctxt "ModularOnline,PlayerNotSignedIn"
+msgid "You are not signed in to the online service."
+msgstr "Вы не вошли в онлайн-сервис."
+
+#. Key:	Privilege.AccountTypeRestricted
+#. SourceLocation:	/ModularOnline/StringTables/ModularOnline.ModularOnline
+#: /ModularOnline/StringTables/ModularOnline.ModularOnline
+msgctxt "ModularOnline,Privilege.AccountTypeRestricted"
+msgid "This account is not of a type that may play the game."
+msgstr "Этот тип учётной записи не позволяет играть в игру."
+
+#. Key:	Privilege.AccountUseRestricted
+#. SourceLocation:	/ModularOnline/StringTables/ModularOnline.ModularOnline
+#: /ModularOnline/StringTables/ModularOnline.ModularOnline
+msgctxt "ModularOnline,Privilege.AccountUseRestricted"
+msgid "The platform has restricted this account."
+msgstr "Платформа ограничила эту учётную запись."
+
+#. Key:	Privilege.AgeRestricted
+#. SourceLocation:	/ModularOnline/StringTables/ModularOnline.ModularOnline
+#: /ModularOnline/StringTables/ModularOnline.ModularOnline
+msgctxt "ModularOnline,Privilege.AgeRestricted"
+msgid "Parental controls on this account block the game."
+msgstr "Родительский контроль на этой учётной записи блокирует игру."
+
+#. Key:	Privilege.LicenseInvalid
+#. SourceLocation:	/ModularOnline/StringTables/ModularOnline.ModularOnline
+#: /ModularOnline/StringTables/ModularOnline.ModularOnline
+msgctxt "ModularOnline,Privilege.LicenseInvalid"
+msgid "This account does not own the game."
+msgstr "На этой учётной записи игра не куплена."
+
+#. Key:	Privilege.NetworkUnavailable
+#. SourceLocation:	/ModularOnline/StringTables/ModularOnline.ModularOnline
+#: /ModularOnline/StringTables/ModularOnline.ModularOnline
+msgctxt "ModularOnline,Privilege.NetworkUnavailable"
+msgid "The platform could not be reached. Check the connection and try again."
+msgstr "Не удалось связаться с платформой. Проверьте подключение и попробуйте снова."
+
+#. Key:	Privilege.NotLoggedIn
+#. SourceLocation:	/ModularOnline/StringTables/ModularOnline.ModularOnline
+#: /ModularOnline/StringTables/ModularOnline.ModularOnline
+msgctxt "ModularOnline,Privilege.NotLoggedIn"
+msgid "No account is signed in. Sign in to the platform and try again."
+msgstr "Вход в учётную запись не выполнен. Войдите на платформе и попробуйте снова."
+
+#. Key:	Privilege.PlatformFailure
+#. SourceLocation:	/ModularOnline/StringTables/ModularOnline.ModularOnline
+#: /ModularOnline/StringTables/ModularOnline.ModularOnline
+msgctxt "ModularOnline,Privilege.PlatformFailure"
+msgid "The platform refused without giving a reason."
+msgstr "Платформа отказала без объяснения причин."
+
+#. Key:	Privilege.VersionOutdated
+#. SourceLocation:	/ModularOnline/StringTables/ModularOnline.ModularOnline
+#: /ModularOnline/StringTables/ModularOnline.ModularOnline
+msgctxt "ModularOnline,Privilege.VersionOutdated"
+msgid "The game or the system has to be updated before it can be played."
+msgstr "Чтобы играть, нужно обновить игру или систему."
+
+#. Key:	ServerNotSignedIn
+#. SourceLocation:	/ModularOnline/StringTables/ModularOnline.ModularOnline
+#: /ModularOnline/StringTables/ModularOnline.ModularOnline
+msgctxt "ModularOnline,ServerNotSignedIn"
+msgid "This server is not signed in to the online service."
+msgstr "Этот сервер не вошёл в онлайн-сервис."
+
+#. Key:	SessionsCannotPublishUnlisted
+#. SourceLocation:	/ModularOnline/StringTables/ModularOnline.ModularOnline
+#: /ModularOnline/StringTables/ModularOnline.ModularOnline
+msgctxt "ModularOnline,SessionsCannotPublishUnlisted"
+msgid "This platform cannot publish an unlisted match."
+msgstr "Эта платформа не может опубликовать матч, скрытый из поиска."
+

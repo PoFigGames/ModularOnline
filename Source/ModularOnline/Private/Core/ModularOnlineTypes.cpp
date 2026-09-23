@@ -2,12 +2,11 @@
 
 #include "Core/ModularOnlineTypes.h"
 
+#include "Core/ModularOnlineStringTable.h"
 #include "Online/OnlineError.h"
 #include "Online/OnlineErrorDefinitions.h"
 
 #include UE_INLINE_GENERATED_CPP_BY_NAME(ModularOnlineTypes)
-
-#define LOCTEXT_NAMESPACE "ModularOnline"
 
 namespace PoFigGames::Online::Private
 {
@@ -67,7 +66,8 @@ FModularOnlineResult FModularOnlineResult::NotSupported(const FGameplayTag Featu
 	Result.Category = EModularOnlineErrorCategory::NotSupported;
 	const auto NotImplemented = UE::Online::Errors::NotImplemented();
 	Result.ErrorId = NotImplemented.GetErrorId();
-	Result.ErrorText = FText::Format(LOCTEXT("FeatureNotSupported", "{0} is not available on this platform."), FText::FromName(Feature.GetTagName()));
+	const auto Sentence = FText::FromStringTable(PoFigGames::Online::StringTableId, TEXT("FeatureNotSupported"));
+	Result.ErrorText = FText::Format(Sentence, FText::FromName(Feature.GetTagName()));
 	Result.MissingFeature = Feature;
 
 	return Result;
@@ -98,5 +98,3 @@ FString FModularOnlineResult::ToLogString() const
 
 	return FString::Printf(TEXT("%s (%s)"), *ErrorId, *PoFigGames::Online::LexToString(Category));
 }
-
-#undef LOCTEXT_NAMESPACE
