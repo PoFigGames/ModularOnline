@@ -76,5 +76,8 @@ public class ModularOnline : ModuleRules
 				"OnlineSubsystemUtils",
 			]
 		);
+
+		// FUniqueNetIdRepl carrying an account id needs its own serializer registration under Iris.
+		SetupIrisSupport(target);
 	}
 }

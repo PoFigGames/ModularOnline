@@ -21,5 +21,8 @@ public class ModularOnlineDeveloper : ModuleRules
 				"Projects",
 			]
 		);
+
+		// The descriptor builder and the serializer registry, which the account id test asks about.
+		SetupIrisSupport(target);
 	}
 }

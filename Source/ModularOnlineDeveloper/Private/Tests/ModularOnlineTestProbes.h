@@ -2,6 +2,7 @@
 
 #pragma once
 
+#include "GameFramework/OnlineReplStructs.h"
 #include "Match/ModularMatchSubsystem.h"
 #include "User/ModularUserInfo.h"
 #include "User/ModularUserSubsystem.h"
@@ -65,4 +66,19 @@ public:
 
 		return CanBecomeGuest(Request);
 	}
+};
+
+
+/**
+ * @struct FModularAccountIdProbe
+ *
+ * @brief An account id held the way APlayerState::UniqueId holds one, so a test can ask Iris how it replicates.
+ */
+USTRUCT()
+struct FModularAccountIdProbe
+{
+	GENERATED_BODY()
+
+	UPROPERTY()
+	FUniqueNetIdRepl Id { };
 };

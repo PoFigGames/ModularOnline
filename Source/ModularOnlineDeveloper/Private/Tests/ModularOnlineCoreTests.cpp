@@ -6,6 +6,12 @@
 #include "Internationalization/StringTable.h"
 #include "Internationalization/StringTableCore.h"
 #include "Internationalization/TextLocalizationResource.h"
+#include "Iris/ReplicationState/ReplicationStateDescriptor.h"
+#include "Iris/ReplicationState/ReplicationStateDescriptorBuilder.h"
+#include "Iris/Serialization/NetBitStreamReader.h"
+#include "Iris/Serialization/NetBitStreamWriter.h"
+#include "Iris/Serialization/NetSerializationContext.h"
+#include "Iris/Serialization/NetSerializer.h"
 #include "Misc/AutomationTest.h"
 
 #include "Match/ModularLobbyBackend.h"
@@ -34,6 +40,96 @@
 namespace PoFigGames::Online::Tests
 {
 	constexpr EAutomationTestFlags TestFlags = EAutomationTestFlags::EditorContext | EAutomationTestFlags::ClientContext | EAutomationTestFlags::ProductFilter;
+
+
+	/**
+	 * @class FTestAccountIdRegistry
+	 *
+	 * @brief Account ids of a provider that exists only in the tests: a handle, replicated as its four bytes.
+	 *
+	 * Reading ignores whatever follows the four bytes, as a careless provider would, so the tests can show that the
+	 * serializer does not rely on the provider to refuse padded data.
+	 */
+	class FTestAccountIdRegistry final : public UE::Online::IOnlineAccountIdRegistry
+	{
+	public:
+		virtual FString ToString(const UE::Online::FAccountId& AccountId) const override
+		{
+			return FString::FromInt(AccountId.GetHandle());
+		}
+
+		virtual FString ToLogString(const UE::Online::FAccountId& AccountId) const override
+		{
+			return ToString(AccountId);
+		}
+
+		virtual TArray<uint8> ToReplicationData(const UE::Online::FAccountId& AccountId) const override
+		{
+			const auto Handle = AccountId.GetHandle();
+
+			return TArray<uint8>(reinterpret_cast<const uint8*>(&Handle), sizeof(Handle));
+		}
+
+		virtual UE::Online::FAccountId FromReplicationData(const TArray<uint8>& ReplicationData) override
+		{
+			uint32 Handle { 0 };
+
+			if (ReplicationData.Num() >= sizeof(Handle))
+			{
+				FMemory::Memcpy(&Handle, ReplicationData.GetData(), sizeof(Handle));
+			}
+
+			return UE::Online::FAccountId(UE::Online::EOnlineServices::GameDefined_0, Handle);
+		}
+
+		virtual UE::Online::FAccountId FromStringData(const FString& StringData) override
+		{
+			return UE::Online::FAccountId(UE::Online::EOnlineServices::GameDefined_0, static_cast<uint32>(FCString::Atoi(*StringData)));
+		}
+	};
+
+
+	/**
+	 * @class FTestLegacyNetId
+	 *
+	 * @brief A valid Online Subsystem id, the kind the account id serializer does not replicate.
+	 */
+	class FTestLegacyNetId final : public FUniqueNetId
+	{
+	public:
+		virtual FName GetType() const override
+		{
+			return TEXT("Test");
+		}
+
+		virtual const uint8* GetBytes() const override
+		{
+			return reinterpret_cast<const uint8*>(&Value);
+		}
+
+		virtual int32 GetSize() const override
+		{
+			return sizeof(Value);
+		}
+
+		virtual bool IsValid() const override
+		{
+			return true;
+		}
+
+		virtual FString ToString() const override
+		{
+			return FString::FromInt(Value);
+		}
+
+		virtual FString ToDebugString() const override
+		{
+			return ToString();
+		}
+
+	private:
+		int32 Value { 42 };
+	};
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FModularOnlineResultTest, "ModularOnline.Core.Result", PoFigGames::Online::Tests::TestFlags)
@@ -743,6 +839,138 @@ bool FModularOnlineStringTableTest::RunTest(const FString& /*Parameters*/)
 			Expected && Expected->LocalizedString.IsValid() && Shown.ToString() == *Expected->LocalizedString);
 
 		FInternationalization::Get().RestoreCultureState(Previous);
+	}
+
+	return true;
+}
+
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FModularOnlineAccountIdIrisTest, "ModularOnline.Core.AccountIdUnderIris", PoFigGames::Online::Tests::TestFlags)
+
+bool FModularOnlineAccountIdIrisTest::RunTest(const FString& /*Parameters*/)
+{
+	using namespace UE::Net;
+
+	// The serializer Iris picks for a property like APlayerState::UniqueId; the engine's own dereferences null on an
+	// account id.
+	const auto Descriptor = FReplicationStateDescriptorBuilder::CreateDescriptorForStruct(FModularAccountIdProbe::StaticStruct());
+	const auto Member = Descriptor.IsValid() && Descriptor->MemberCount > 0 ? &Descriptor->MemberSerializerDescriptors[0] : nullptr;
+	const auto Serializer = Member ? Member->Serializer : nullptr;
+	const FString SerializerName { Serializer ? Serializer->Name : TEXT("") };
+
+	const auto bIsPluginSerializer = SerializerName == TEXT("FModularUniqueNetIdNetSerializer");
+
+	TestTrue(*FString::Printf(TEXT("Iris replicates an id through the plugin's serializer, not %s"), *SerializerName), bIsPluginSerializer);
+
+	// Quantized state lives in these two; sixteen bytes of id stay inline, so nothing here needs Iris's allocator.
+	alignas(16) uint8 Quantized[256] { };
+	alignas(16) uint8 Received[256] { };
+	alignas(16) uint8 Stream[256] { };
+
+	// Driven only through the plugin's serializer: the engine's would take the test run down instead of failing it.
+	if (bIsPluginSerializer && Serializer->QuantizedTypeSize <= sizeof(Quantized))
+	{
+		// A provider only this test knows, so the id round-trips on any machine and names no platform.
+		PoFigGames::Online::Tests::FTestAccountIdRegistry Registry;
+		UE::Online::FOnlineIdRegistryRegistry::Get().RegisterAccountIdRegistry(UE::Online::EOnlineServices::GameDefined_0, &Registry);
+
+		const FUniqueNetIdRepl Sent { UE::Online::FAccountId(UE::Online::EOnlineServices::GameDefined_0, 42) };
+		FNetSerializationContext Context;
+
+		FNetQuantizeArgs QuantizeArgs;
+		QuantizeArgs.NetSerializerConfig = Member->SerializerConfig;
+		QuantizeArgs.Source = NetSerializerValuePointer(&Sent);
+		QuantizeArgs.Target = NetSerializerValuePointer(Quantized);
+		Serializer->Quantize(Context, QuantizeArgs);
+
+		FNetBitStreamWriter Writer;
+		Writer.InitBytes(Stream, sizeof(Stream));
+		FNetSerializationContext WriteContext { &Writer };
+
+		FNetSerializeArgs SerializeArgs;
+		SerializeArgs.NetSerializerConfig = Member->SerializerConfig;
+		SerializeArgs.Source = NetSerializerValuePointer(Quantized);
+		Serializer->Serialize(WriteContext, SerializeArgs);
+		Writer.CommitWrites();
+
+		FNetBitStreamReader Reader;
+		Reader.InitBits(Stream, Writer.GetPosBits());
+		FNetSerializationContext ReadContext { &Reader };
+
+		FNetDeserializeArgs DeserializeArgs;
+		DeserializeArgs.NetSerializerConfig = Member->SerializerConfig;
+		DeserializeArgs.Target = NetSerializerValuePointer(Received);
+		Serializer->Deserialize(ReadContext, DeserializeArgs);
+
+		FUniqueNetIdRepl Restored { };
+		FNetDequantizeArgs DequantizeArgs;
+		DequantizeArgs.NetSerializerConfig = Member->SerializerConfig;
+		DequantizeArgs.Source = NetSerializerValuePointer(Received);
+		DequantizeArgs.Target = NetSerializerValuePointer(&Restored);
+		Serializer->Dequantize(Context, DequantizeArgs);
+
+		TestFalse(TEXT("An account id is quantized without an error"), Context.HasErrorOrOverflow());
+		TestFalse(TEXT("It is written without an error"), WriteContext.HasErrorOrOverflow());
+		TestFalse(TEXT("It is read back without an error"), ReadContext.HasErrorOrOverflow());
+		TestTrue(TEXT("It comes back as an account id"), Restored.IsV2());
+		TestTrue(TEXT("It comes back unchanged"), Restored == Sent);
+
+		// What a peer could put on the wire by hand, in the serializer's layout.
+		const auto IsAccepted = [&](const uint32 OnlineServices, const TArray<uint8>& Bytes)
+		{
+			FNetBitStreamWriter Forger;
+			Forger.InitBytes(Stream, sizeof(Stream));
+			Forger.WriteBool(true);
+			Forger.WriteBits(OnlineServices, 8);
+			Forger.WriteBits(Bytes.Num(), 8);
+
+			for (const auto Byte : Bytes)
+			{
+				Forger.WriteBits(Byte, 8);
+			}
+
+			Forger.CommitWrites();
+
+			FNetBitStreamReader ForgedReader;
+			ForgedReader.InitBits(Stream, Forger.GetPosBits());
+			FNetSerializationContext ForgedContext { &ForgedReader };
+			Serializer->Deserialize(ForgedContext, DeserializeArgs);
+
+			return !ForgedContext.HasErrorOrOverflow();
+		};
+
+		const auto GameDefined0 = static_cast<uint32>(UE::Online::EOnlineServices::GameDefined_0);
+		const auto GameDefined1 = static_cast<uint32>(UE::Online::EOnlineServices::GameDefined_1);
+		const auto Genuine = Registry.ToReplicationData(Sent.GetV2());
+		auto Padded = Genuine;
+		Padded.Append({ 0xDE, 0xAD });
+
+		TestTrue(TEXT("A hand-written stream of a genuine id is accepted"), IsAccepted(GameDefined0, Genuine));
+		TestFalse(TEXT("An id of a provider this machine does not run is refused"), IsAccepted(GameDefined1, Genuine));
+		TestFalse(TEXT("Bytes the provider reads past are refused"), IsAccepted(GameDefined0, Padded));
+		TestFalse(TEXT("Bytes that name nobody are refused"), IsAccepted(GameDefined0, { 0, 0, 0, 0 }));
+		TestFalse(TEXT("An empty account id is refused"), IsAccepted(GameDefined0, { }));
+
+		// An Online Subsystem id is not replicated, and saying so beats sending nothing in its place.
+		AddExpectedMessagePlain(TEXT("An online id was not sent"), ELogVerbosity::Error, EAutomationExpectedMessageFlags::Contains, 1);
+
+		const FUniqueNetIdRef LegacyId { MakeShared<PoFigGames::Online::Tests::FTestLegacyNetId>() };
+		const FUniqueNetIdRepl LegacySent { LegacyId };
+		FNetSerializationContext LegacyContext;
+		QuantizeArgs.Source = NetSerializerValuePointer(&LegacySent);
+		Serializer->Quantize(LegacyContext, QuantizeArgs);
+
+		TestTrue(TEXT("An Online Subsystem id is refused for sending"), LegacyContext.HasError());
+
+		for (const auto State : { Quantized, Received })
+		{
+			FNetFreeDynamicStateArgs FreeArgs;
+			FreeArgs.NetSerializerConfig = Member->SerializerConfig;
+			FreeArgs.Source = NetSerializerValuePointer(State);
+			Serializer->FreeDynamicState(Context, FreeArgs);
+		}
+
+		UE::Online::FOnlineIdRegistryRegistry::Get().UnregisterAccountIdRegistry(UE::Online::EOnlineServices::GameDefined_0);
 	}
 
 	return true;

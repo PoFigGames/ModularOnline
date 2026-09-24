@@ -60,11 +60,20 @@ First public shape of the plugin. Everything below is implemented and builds; se
 - **Localisation.** Every sentence shown to a player comes from the plugin's string table asset, and
   English and Russian ship with the plugin as its own localisation target, loaded, cooked and staged by
   the engine without the project doing anything.
+- **Account ids under Iris.** The plugin brings its own Iris serializer for `FUniqueNetIdRepl` and
+  registers it in place of the engine's, which knows only Online Subsystem (v1) ids and cannot carry the
+  Online Services account id in `APlayerState::UniqueId`. It carries account ids only: an id travels as its
+  provider and that provider's replication data, at most 255 bytes. What arrives is taken only if a
+  provider running on the receiving machine reads it as an id and writes it back byte for byte; anything
+  else fails the stream as malformed, so an id of a provider the receiver does not run is refused rather
+  than kept as a foreign id. An Online Subsystem (v1) id is not replicated and is reported as an error when
+  something tries to send one.
 - **Console commands.** `ModularOnline.Status`, `.Refresh`, `.HasFeature`.
-- **Automation tests.** Seventeen, over the parts that are pure rules: error mapping, role resolution,
+- **Automation tests.** Eighteen, over the parts that are pure rules: error mapping, role resolution,
   cross play policy, presence states, match handles, settings, published text, reserved attributes, the
-  merge of two searches, which steps a login walks when nobody signs anybody in, and a translation for
-  every sentence of the string table made from its current English.
+  merge of two searches, which steps a login walks when nobody signs anybody in, a translation for every
+  sentence of the string table made from its current English, and an account id's round trip through the
+  serializer Iris picks for it, which refuses forged ones.
 
 ### Not yet verified
 
