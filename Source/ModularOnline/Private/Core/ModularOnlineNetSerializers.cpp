@@ -152,9 +152,7 @@ namespace PoFigGames::Online::Private
 		}
 
 		// Taken for an id only once shown to be one: a peer that sends anything else is sending a broken stream.
-		const auto bIsGenuine = !Context.HasErrorOrOverflow() && (!bHasId || IsGenuine(static_cast<uint8>(OnlineServices), Data));
-
-		if (bIsGenuine)
+		if (!Context.HasErrorOrOverflow() && (!bHasId || IsGenuine(static_cast<uint8>(OnlineServices), Data)))
 		{
 			Target.OnlineServices = static_cast<uint8>(OnlineServices);
 			Target.Data.AdjustSize(Context, Data.Num());
@@ -195,7 +193,7 @@ namespace PoFigGames::Online::Private
 		const auto& Source = *reinterpret_cast<const QuantizedType*>(Args.Source);
 		auto& Target = *reinterpret_cast<SourceType*>(Args.Target);
 
-		const TArray<uint8> Data { Source.Data.GetData(), static_cast<int32>(Source.Data.Num()) };
+		const TArray Data { Source.Data.GetData(), static_cast<int32>(Source.Data.Num()) };
 		const auto Services = static_cast<UE::Online::EOnlineServices>(Source.OnlineServices);
 		const auto AccountId = Data.IsEmpty() ? UE::Online::FAccountId { } : UE::Online::FOnlineIdRegistryRegistry::Get().ToAccountId(Services, Data);
 

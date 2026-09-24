@@ -22,7 +22,7 @@ namespace PoFigGames::Online::Private
 	class FUniqueNetIdReplRegistryDelegates final : public UE::Net::FNetSerializerRegistryDelegates
 	{
 	public:
-		~FUniqueNetIdReplRegistryDelegates() override
+		virtual ~FUniqueNetIdReplRegistryDelegates() override
 		{
 			// Does nothing in a monolithic build, where the registry may already be destroyed at this point.
 			UE_NET_UNREGISTER_NETSERIALIZER_INFO(UniqueNetIdReplStructName);
@@ -30,7 +30,7 @@ namespace PoFigGames::Online::Private
 
 	protected:
 		// Post freeze, because by then every loaded module has registered and the engine's info is there to replace
-		void OnPostFreezeNetSerializerRegistry() override
+		virtual void OnPostFreezeNetSerializerRegistry() override
 		{
 			const auto EngineInfo = UE::Net::FPropertyNetSerializerInfoRegistry::FindStructSerializerInfo(UniqueNetIdReplStructName);
 
